@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, onMounted } from "vue";
 import axios from "axios";
+import SlotTable from "@/components/SlotTable.vue";
 
 const date = ref(new Date().toISOString().slice(0, 10));
 const rooms = ref([]);
@@ -8,14 +9,6 @@ const loading = ref(false);
 const error = ref("");
 const filter = ref("ALL");     // ALL | C | S | Z
 const cached = ref(false);
-
-// 필터 옵션
-const filterOptions = [
-  { title: '전체', value: 'ALL' },
-  { title: '캐럴실', value: 'C' },
-  { title: '세미나실', value: 'S' },
-  { title: '소강당', value: 'Z' },
-];
 
 const fetchData = async () => {
     loading.value = true;
@@ -25,7 +18,6 @@ const fetchData = async () => {
         const res = await axios.get(url, {
             headers: { "Cache-Control": "no-cache" }
         });
-        console.log("[API 응답]", res.data);
         rooms.value = res.data.rooms || [];
         cached.value = res.data.cached || false;
     } catch (e) {
@@ -38,162 +30,221 @@ const fetchData = async () => {
 
 onMounted(fetchData);
 
+// 필터 옵션
+const filterOptions = [
+  { label: "전체", value: "ALL" },
+  { label: "캐럴실", value: "C" },
+  { label: "세미나실", value: "S" },
+  { label: "소강당", value: "Z" },
+];
+
 const filteredRooms = computed(() =>
     filter.value === "ALL"
         ? rooms.value
         : rooms.value.filter((r) => r.room_cd.startsWith(filter.value))
 );
-
-// 시간 슬롯 생성 (09:00 ~ 20:30)
-const slots = computed(() => {
-  return Array.from({ length: 24 }, (_, i) => {
-    const h = Math.floor(i / 2) + 9; // 09:00부터 시작
-    const m = i % 2 ? "30" : "00";
-    return `${String(h).padStart(2, "0")}:${m}`;
-  });
-});
-
-// 시간대가 예약 가능한지 확인하는 함수
-const isAvailable = (room, timeSlot) => {
-  return room.times && room.times.some(t => t.start === timeSlot);
-};
 </script>
 
 <template>
-  <v-card class="mb-6">
-    <v-card-title class="text-h5 text-center">
-      대진대학교 도서관 캐럴실 예약 현황
-    </v-card-title>
+  <div class="app-container">
+    <header class="app-header">
+      <h1 class="app-title">대진대학교 도서관 캐럴실 예약 현황</h1>
+    </header>
     
-    <v-card-text>
-      <v-row align="center" no-gutters>
-        <v-col cols="12" sm="auto">
-          <v-menu 
-            v-model="menu"
-            :close-on-content-click="false"
-            transition="scale-transition"
-            offset-y
-          >
-            <template v-slot:activator="{ props }">
-              <div class="d-flex align-center">
-                <v-text-field
-                  v-model="date"
-                  label="날짜 선택"
-                  prepend-icon="mdi-calendar"
-                  readonly
-                  v-bind="props"
-                  density="compact"
-                  hide-details
-                  class="me-2"
-                ></v-text-field>
-                
-                <v-btn 
-                  color="primary" 
-                  @click="fetchData"
-                  :loading="loading"
-                  :disabled="loading"
-                  variant="tonal"
-                >
-                  <v-icon left>mdi-refresh</v-icon>
-                  새로고침
-                </v-btn>
-              </div>
-            </template>
-            <v-date-picker v-model="date" @update:model-value="menu = false; fetchData()"></v-date-picker>
-          </v-menu>
-          
-          <span v-if="cached" class="text-caption text-grey">(캐시된 데이터)</span>
-        </v-col>
-        
-        <v-col cols="12" sm="auto" class="ms-sm-auto mt-2 mt-sm-0">
-          <v-chip-group
-            v-model="filter"
-            mandatory
-          >
-            <v-chip
-              v-for="item in filterOptions"
-              :key="item.value"
-              :value="item.value"
-              filter
-            >
-              {{ item.title }}
-            </v-chip>
-          </v-chip-group>
-        </v-col>
-      </v-row>
-    </v-card-text>
-  </v-card>
-
-  <!-- 로딩 상태 표시 -->
-  <v-overlay
-    :model-value="loading"
-    class="align-center justify-center"
-  >
-    <v-progress-circular
-      indeterminate
-      color="primary"
-      size="64"
-    ></v-progress-circular>
-  </v-overlay>
-
-  <!-- 에러 상태 -->
-  <v-alert
-    v-if="error"
-    type="error"
-    variant="tonal"
-    class="mb-4"
-  >
-    {{ error }}
-  </v-alert>
-
-  <v-alert
-    v-if="!loading && !error && rooms.length === 0"
-    type="info"
-    variant="tonal"
-    class="mb-4"
-  >
-    예약 가능한 방이 없습니다.
-  </v-alert>
-
-  <!-- 필터링된 결과 카운트 -->
-  <v-sheet v-if="rooms.length > 0" class="mb-4 text-body-2 text-medium-emphasis">
-    총 {{ filteredRooms.length }}개 방 표시 중 (전체 {{ rooms.length }}개)
-  </v-sheet>
-
-  <!-- 슬롯 테이블 -->
-  <v-card v-if="!loading && !error && rooms.length > 0">
-    <div class="table-responsive">
-      <v-table density="compact" fixed-header height="500px">
-        <thead>
-          <tr>
-            <th class="text-left">방</th>
-            <th v-for="s in slots" :key="s" class="text-center" width="70">
-              {{ s }}
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="r in filteredRooms" :key="r.room_cd">
-            <td class="font-weight-medium">{{ r.title }} ({{ r.room_cd }})</td>
-            <td 
-              v-for="s in slots" 
-              :key="s" 
-              class="text-center" 
-              :class="isAvailable(r, s) ? 'bg-success text-white' : 'bg-grey-lighten-3'"
-            >
-              <v-icon v-if="isAvailable(r, s)" size="small" color="white">
-                mdi-check
-              </v-icon>
-            </td>
-          </tr>
-        </tbody>
-      </v-table>
+    <div class="control-panel">
+      <div class="date-controls">
+        <input 
+          type="date" 
+          v-model="date" 
+          @change="fetchData" 
+          class="date-picker"
+        />
+        <button 
+          @click="fetchData" 
+          class="refresh-button"
+          :disabled="loading"
+        >
+          <span v-if="loading">로딩중...</span>
+          <span v-else>새로고침</span>
+        </button>
+        <span v-if="cached" class="cached-label">(캐시)</span>
+      </div>
+      
+      <div class="filter-controls">
+        <button 
+          v-for="option in filterOptions" 
+          :key="option.value"
+          @click="filter = option.value"
+          :class="['filter-button', { active: filter === option.value }]"
+        >
+          {{ option.label }}
+        </button>
+      </div>
     </div>
-  </v-card>
+    
+    <div v-if="loading" class="loader">
+      <div class="spinner"></div>
+      <span>데이터를 불러오는 중...</span>
+    </div>
+    
+    <div v-else-if="error" class="error-message">
+      오류가 발생했습니다: {{ error }}
+    </div>
+    
+    <div v-else-if="rooms.length === 0" class="empty-message">
+      예약 가능한 방이 없습니다.
+    </div>
+    
+    <div v-else class="room-count">
+      총 {{ filteredRooms.length }}개 방 표시 중 (전체 {{ rooms.length }}개)
+    </div>
+    
+    <SlotTable v-if="!loading && !error && rooms.length > 0" :rooms="filteredRooms" />
+  </div>
 </template>
 
 <style scoped>
-.table-responsive {
-  overflow-x: auto;
+.app-container {
+  max-width: 100%;
+  padding: 0 15px;
+  margin: 0 auto;
+}
+
+.app-header {
+  text-align: center;
+  padding: 15px 0;
+  margin-bottom: 20px;
+}
+
+.app-title {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: #1976D2;
+  margin: 0;
+}
+
+.control-panel {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 15px;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  background-color: #f5f5f5;
+  padding: 10px;
+  border-radius: 6px;
+}
+
+.date-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.date-picker {
+  padding: 6px 10px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+}
+
+.refresh-button {
+  background-color: #1976D2;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.refresh-button:disabled {
+  background-color: #cccccc;
+}
+
+.cached-label {
+  font-size: 0.8rem;
+  color: #666;
+}
+
+.filter-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.filter-button {
+  background-color: white;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.filter-button.active {
+  background-color: #1976D2;
+  color: white;
+  border-color: #1976D2;
+}
+
+.loader {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 0;
+}
+
+.spinner {
+  width: 40px;
+  height: 40px;
+  border: 4px solid rgba(0, 0, 0, 0.1);
+  border-left-color: #1976D2;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-bottom: 10px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.error-message {
+  background-color: #ffebee;
+  color: #c62828;
+  padding: 12px;
+  border-radius: 4px;
+  margin-bottom: 20px;
+}
+
+.empty-message {
+  background-color: #e8f5e9;
+  color: #2e7d32;
+  padding: 12px;
+  border-radius: 4px;
+  margin-bottom: 20px;
+  text-align: center;
+}
+
+.room-count {
+  color: #666;
+  font-size: 0.9rem;
+  margin-bottom: 15px;
+}
+
+@media (max-width: 640px) {
+  .control-panel {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+  
+  .date-controls {
+    flex-wrap: wrap;
+  }
+  
+  .app-title {
+    font-size: 1.3rem;
+  }
 }
 </style>
