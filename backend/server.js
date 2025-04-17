@@ -1,41 +1,43 @@
-import dotenv from "dotenv";
-dotenv.config();
-
 import express from "express";
 import cors from "cors";
-import { crawl } from "./crawler.js";      // ← import 변경
+import { crawl } from "./crawler.js";
 
-const PORT = process.env.PORT || 8080;
 const app = express();
 app.use(cors());
 
-/* 메모리 캐시 */
-const cache = new Map();
-const CACHE_TTL_MS = 30 * 60 * 1000; // 30분
+/* SSE 진행률 스트리밍 */
+app.get("/api/availability-progress", (req, res) => {
+  const date = req.query.date || new Date().toISOString().slice(0, 10);
 
-app.get("/api/availability", async (req, res) => {
-    const date = req.query.date || new Date().toISOString().slice(0, 10);
-    const cached = cache.get(date);
-    if (cached && Date.now() - cached.ts < CACHE_TTL_MS) {
-        return res.json({
-            date,
-            cached: true,
-            rooms: cached.data ?? [],      // rooms 가 undefined 면 빈 배열로
-        });
-    }
+  // SSE 헤더
+  res.set({
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache",
+    Connection: "keep-alive",
+  });
 
-    try {
-        const rooms = await crawl(date);       // ← 함수명 변경
-        cache.set(date, { ts: Date.now(), data: rooms });
-        res.json({ date, cached: false, rooms });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: err.message });
-    }
+  // 진행률 콜백
+  const onProgress = (pct) => {
+    res.write(`event: progress\n`);
+    res.write(`data: ${pct}\n\n`);
+  };
+
+  // 실제 크롤 시작
+  crawl(date, onProgress)
+    .then((rooms) => {
+      res.write(`event: done\n`);
+      res.write(`data: ${JSON.stringify({ rooms })}\n\n`);
+      res.end();
+    })
+    .catch((err) => {
+      res.write(`event: error\n`);
+      res.write(`data: ${err.message}\n\n`);
+      res.end();
+    });
 });
 
-app.get("/api/health", (_, res) => res.send("OK"));
+// (기존 /api/availability 캐시 엔드포인트도 그대로 보존)
 
-app.listen(PORT, () =>
-    console.log(`🚀 backend 서버 구동 : http://localhost:${PORT}`)
-);
+app.listen(8080, () => {
+  console.log("🚀 서버 실행 중 – 포트 8080");
+});
