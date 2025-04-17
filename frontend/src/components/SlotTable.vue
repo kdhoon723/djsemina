@@ -1,6 +1,4 @@
 <script setup>
-import { computed } from 'vue';
-
 const props = defineProps({
   rooms: { type: Array, default: () => [] },
 });
@@ -12,10 +10,12 @@ const slots = Array.from({ length: 24 }, (_, i) => {
   return `${String(h).padStart(2, "0")}:${m}`;
 });
 
-// 각 방의 시간별 가용성 확인 함수
-const isAvailable = (room, slot) => {
-  return room.times?.some(t => t.start.slice(0, 5) === slot);
-};
+// 디버깅용 로그
+console.log("전체 방 데이터:", props.rooms);
+if (props.rooms.length > 0) {
+  console.log("첫 번째 방 정보:", props.rooms[0]);
+  console.log("첫 번째 방의 times:", props.rooms[0]?.times);
+}
 </script>
 
 <template>
@@ -35,7 +35,7 @@ const isAvailable = (room, slot) => {
       </thead>
       <tbody>
         <tr
-          v-for="r in rooms"
+          v-for="r in props.rooms"
           :key="r.room_cd"
           class="hover:bg-sky-50 transition-colors"
         >
@@ -48,10 +48,13 @@ const isAvailable = (room, slot) => {
             :key="s"
             class="border h-6 sm:h-8 w-14"
             :class="{
-              'bg-green-500 text-white': isAvailable(r, s),
-              'bg-gray-200': !isAvailable(r, s)
+              'bg-green-500 text-white': r.times && r.times.some(t => t.start === s),
+              'bg-gray-200': !r.times || !r.times.some(t => t.start === s)
             }"
-          />
+          >
+            <!-- 디버깅용 정보 출력 -->
+            <span v-if="r.times && r.times.some(t => t.start === s)" class="text-xs">O</span>
+          </td>
         </tr>
       </tbody>
     </table>
