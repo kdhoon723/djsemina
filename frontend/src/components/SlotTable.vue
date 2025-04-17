@@ -1,20 +1,21 @@
 <script setup>
-// ⚙️ props 선언 및 전체 rooms 배열 출력
+import { computed } from 'vue';
+
 const props = defineProps({
   rooms: { type: Array, default: () => [] },
 });
-console.log("🛠 DEBUG rooms:", props.rooms);
 
-// ⚙️ 첫 번째 방의 times 배열 출력
-console.log("🛠 DEBUG first room times:", props.rooms[0]?.times);
-
-// ⚙️ slots 배열 생성 및 출력
+// 시간 슬롯 생성 (09:00 ~ 20:30)
 const slots = Array.from({ length: 24 }, (_, i) => {
   const h = Math.floor(i / 2) + 9; // 09:00부터 시작
   const m = i % 2 ? "30" : "00";
   return `${String(h).padStart(2, "0")}:${m}`;
 });
-console.log("🛠 DEBUG slots:", slots);
+
+// 각 방의 시간별 가용성 확인 함수
+const isAvailable = (room, slot) => {
+  return room.times?.some(t => t.start.slice(0, 5) === slot);
+};
 </script>
 
 <template>
@@ -34,12 +35,12 @@ console.log("🛠 DEBUG slots:", slots);
       </thead>
       <tbody>
         <tr
-          v-for="r in props.rooms"
+          v-for="r in rooms"
           :key="r.room_cd"
           class="hover:bg-sky-50 transition-colors"
         >
           <td class="border px-2 py-1 whitespace-nowrap font-medium w-16">
-            {{ r.room_cd }}
+            {{ r.title }} ({{ r.room_cd }})
           </td>
 
           <td
@@ -47,13 +48,8 @@ console.log("🛠 DEBUG slots:", slots);
             :key="s"
             class="border h-6 sm:h-8 w-14"
             :class="{
-              'bg-green-500 text-white': r.times.some(t => {
-                // ⚙️ 각 매칭 결과도 로그로 함께 찍어 봅니다
-                const match = t.start.slice(0,5) === s;
-                console.log(`🛠 matching ${t.start} → ${s}:`, match);
-                return match;
-              }),
-              'bg-gray-200': !r.times.some(t => t.start.slice(0,5) === s)
+              'bg-green-500 text-white': isAvailable(r, s),
+              'bg-gray-200': !isAvailable(r, s)
             }"
           />
         </tr>

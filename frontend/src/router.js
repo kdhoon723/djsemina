@@ -3,5 +3,15 @@ import Availability from "./pages/Availability.vue";
 
 export default createRouter({
   history: createWebHistory(),
-  routes: [{ path: "/", component: Availability }],
+  routes: [
+    { 
+      path: "/", 
+      component: Availability,
+      name: "home" 
+    },
+    {
+      path: "/:pathMatch(.*)*",
+      redirect: "/"
+    }
+  ],
 });
