@@ -14,6 +14,10 @@ export default defineConfig({
     },
   },
   server: {
+    host: '0.0.0.0',
+    port: 5000,
+    allowedHosts: ['kdhms.kro.kr'],
+    open: true,
     proxy: {
       "/api": {
         target: "http://localhost:8080",
