@@ -5,7 +5,7 @@
 <template>
   <div class="app-wrapper">
     <nav class="navbar">
-      <div class="navbar-brand">대진대학교 도서관 캐럴실 체커</div>
+      <div class="navbar-brand">대진대학교 도서관</div>
     </nav>
     
     <main class="main-content">
@@ -13,7 +13,7 @@
     </main>
     
     <footer class="footer">
-      <p class="footer-text">© {{ new Date().getFullYear() }} 대진대학교 도서관 캐럴실 체커</p>
+      <p class="footer-text">© {{ new Date().getFullYear() }} 대진대학교 도서관 세미나실 체커</p>
     </footer>
   </div>
 </template>
