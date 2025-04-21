@@ -14,61 +14,115 @@ app.use(cors());
 
 // 메모리 캐시: { date: { ts, data, fetchedAt } }
 const cache = new Map();
-const CACHE_TTL_MS = 30 * 60 * 1000; // 30분 캐시
 
-// --- API 라우트 (기존 코드 유지) ---
-// 1) 캐시 조회용
+// --- 자동 크롤링 설정 ---
+const AUTO_CRAWL_INTERVAL_MS = 10 * 60 * 1000; // 10분
+let autoCrawlIntervalId = null;
+let isCrawlerReady = false; // 크롤러 초기화 상태 플래그
+
+/**
+ * 주기적으로 오늘 날짜의 데이터를 크롤링하고 캐시를 업데이트하는 함수
+ */
+async function runAutoCrawl() {
+    // 크롤러가 준비되지 않았으면 실행하지 않음
+    if (!isCrawlerReady) {
+        console.log("[Auto Crawl] 크롤러가 아직 준비되지 않았습니다. 다음 주기에 시도합니다.");
+        return;
+    }
+    const todayDate = new Date().toISOString().slice(0, 10);
+    console.log(`[Auto Crawl] 주기적 크롤링 시작: ${todayDate}`);
+    try {
+        const fetchedAt = new Date().toISOString();
+        const rooms = await crawl(todayDate); // 항상 오늘 날짜로 크롤링
+
+        // 새 데이터 캐시 저장
+        console.log(`[Auto Crawl] 크롤링 완료. 캐시 저장: ${todayDate}, ${rooms.length} rooms`);
+        cache.set(todayDate, { ts: Date.now(), data: rooms, fetchedAt });
+
+    } catch (error) {
+        console.error(`[Auto Crawl] 주기적 크롤링 중 오류 발생 (${todayDate}):`, error.message);
+        // 여기서 에러가 발생해도 다음 주기에 다시 시도
+    }
+}
+
+
+// --- API 라우트 수정 ---
+// '/api/availability' 엔드포인트: 최신 캐시 반환 또는 강제 크롤링
 app.get("/api/availability", async (req, res) => {
     const date = req.query.date || new Date().toISOString().slice(0, 10);
-    const skipCache = req.query._ts !== undefined; // 타임스탬프 파라미터로 캐시 무시
-    const entry = cache.get(date);
-    const now = Date.now();
+    const forceCrawl = req.query._ts !== undefined; // _ts 파라미터가 있으면 강제 크롤링 (롱 프레스용)
+    const entry = cache.get(date); // 요청된 날짜의 캐시 확인
 
-    console.log(`[API /availability] 요청 수신: date=${date}, skipCache=${skipCache}`);
+    console.log(`[API /availability] 요청 수신: date=${date}, forceCrawl=${forceCrawl}`);
 
+    // 1. 강제 크롤링 요청 (_ts 파라미터 존재)
+    if (forceCrawl) {
+        console.log(`[API /availability] 강제 크롤링 요청: ${date}.`);
+        // 크롤링 수행
+        try {
+            const fetchedAt = new Date().toISOString();
+            const rooms = await crawl(date); // 요청된 날짜로 크롤링
 
-    if (entry && !skipCache && now - entry.ts < CACHE_TTL_MS) {
+            // 새 데이터 캐시 저장 (크롤링 결과로 캐시 업데이트)
+            console.log(`[API /availability] 강제 크롤링 완료. 캐시 업데이트: ${date}, ${rooms.length} rooms`);
+            cache.set(date, { ts: Date.now(), data: rooms, fetchedAt });
+
+            return res.json({
+                date,
+                cached: false, // 새로 크롤링했으므로 false
+                fetchedAt: fetchedAt,
+                rooms: rooms,
+            });
+        } catch (error) {
+            console.error(`[/api/availability] 강제 크롤링 오류 (date: ${date}):`, error);
+            return res.status(500).json({ error: "Failed to fetch availability data.", message: error.message });
+        }
+    }
+
+    // 2. 일반 요청 (강제 크롤링 아님) - 캐시된 데이터 반환 시도
+    if (entry) {
         console.log(`[API /availability] 캐시 히트: date=${date}`);
         return res.json({
             date,
-            cached: true,
+            cached: true, // 캐시에서 가져왔으므로 true
             fetchedAt: entry.fetchedAt,
             rooms: entry.data,
         });
     }
 
-    // 캐시 없거나 만료 시 크롤링
+    // 3. 일반 요청인데 캐시가 없는 경우 (예: 서버 시작 직후 다른 날짜 조회) - 크롤링 수행
+    console.log(`[API /availability] 캐시 미스 (일반 요청): ${date}. 크롤링 시작.`);
     try {
-        console.log(`[API /availability] 캐시 미스 또는 만료. 크롤링 시작: ${date}`);
         const fetchedAt = new Date().toISOString();
-        const rooms = await crawl(date); // crawl 함수 호출
+        const rooms = await crawl(date); // 요청된 날짜로 크롤링
 
         // 새 데이터 캐시 저장
-        console.log(`[API /availability] 크롤링 완료. 캐시 저장: ${date}, ${rooms.length} rooms`);
+        console.log(`[API /availability] 캐시 미스 크롤링 완료. 캐시 저장: ${date}, ${rooms.length} rooms`);
         cache.set(date, { ts: Date.now(), data: rooms, fetchedAt });
 
-        res.json({
+        return res.json({
             date,
-            cached: false,
+            cached: false, // 새로 크롤링했으므로 false
             fetchedAt: fetchedAt,
             rooms: rooms,
         });
     } catch (error) {
-        console.error(`[/api/availability] Error:`, error);
-        res.status(500).json({ error: "Failed to fetch availability data.", message: error.message });
+        console.error(`[/api/availability] 캐시 미스 크롤링 오류 (date: ${date}):`, error);
+        return res.status(500).json({ error: "Failed to fetch availability data.", message: error.message });
     }
 });
 
-// 2) 실시간 크롤링용 (선택적 - 캐시 무시하고 항상 크롤링)
+
+// '/api/crawl' 엔드포인트는 유지 (디버깅 또는 특정 목적용)
 app.get("/api/crawl", async (req, res) => {
     const date = req.query.date || new Date().toISOString().slice(0, 10);
-    console.log(`[API /crawl] 강제 크롤링 요청 수신: date=${date}`);
+    console.log(`[API /crawl] 직접 크롤링 요청 수신: date=${date}`);
     try {
         const fetchedAt = new Date().toISOString();
         const rooms = await crawl(date); // crawl 함수 호출
 
-        // 새 데이터 캐시 저장 (실시간 크롤링 결과도 캐시 업데이트)
-        console.log(`[API /crawl] 크롤링 완료. 캐시 업데이트: ${date}, ${rooms.length} rooms`);
+        // 새 데이터 캐시 저장 (직접 크롤링 결과도 캐시 업데이트)
+        console.log(`[API /crawl] 직접 크롤링 완료. 캐시 업데이트: ${date}, ${rooms.length} rooms`);
         cache.set(date, { ts: Date.now(), data: rooms, fetchedAt });
 
         res.json({
@@ -86,52 +140,72 @@ app.get("/api/crawl", async (req, res) => {
 
 // --- 서버 시작 및 종료 처리 ---
 
-// 서버 시작 전에 크롤러 초기화
+// 서버 시작 전에 크롤러 초기화 및 자동 크롤링 시작
 (async () => {
     try {
         await initializeCrawler(); // 크롤러 초기화 함수 호출
-        // 초기화 성공 시 서버 리스닝 시작
+        console.log("✅ 크롤러 초기화 성공.");
+        isCrawlerReady = true; // 크롤러 준비 완료 상태로 설정
+
+        // 초기화 성공 시 즉시 오늘 데이터 크롤링 한번 실행 (서버 시작 시 최신 데이터 확보)
+        console.log("[초기 실행] 서버 시작 후 첫 자동 크롤링 실행 (오늘 날짜)...");
+        await runAutoCrawl(); // 첫 크롤링 실행
+
+        // 주기적 크롤링 시작 (첫 실행 후 설정)
+        console.log(`[Auto Crawl] ${AUTO_CRAWL_INTERVAL_MS / 60000}분 간격으로 자동 크롤링 설정.`);
+        autoCrawlIntervalId = setInterval(runAutoCrawl, AUTO_CRAWL_INTERVAL_MS);
+
+        // 초기화 및 첫 크롤링 성공 후 서버 리스닝 시작
         app.listen(PORT, () => {
-            console.log(`Server listening on http://0.0.0.0:${PORT}`);
+            console.log(`🚀 Server listening on http://0.0.0.0:${PORT}`);
         });
     } catch (error) {
-        console.error("크롤러 초기화 실패. 서버를 시작할 수 없습니다.", error);
-        process.exit(1); // 초기화 실패 시 프로세스 종료
+        console.error("❌ 크롤러 초기화 또는 첫 크롤링 실패. 서버를 시작할 수 없습니다.", error);
+        // 크롤러가 준비 안된 상태로 남아있거나, 에러 발생 시 프로세스 종료
+        process.exit(1);
     }
 })();
 
 
-// 정상 종료 처리 (Ctrl+C 등)
+// 정상 종료 처리 (Ctrl+C 등) - Interval 클리어 추가
 process.on('SIGINT', async () => {
     console.log('\nSIGINT signal received. Closing crawler and exiting...');
+    if (autoCrawlIntervalId) {
+        clearInterval(autoCrawlIntervalId); // 주기적 크롤링 중지
+        console.log("[종료] 자동 크롤링 Interval 중지됨.");
+    }
     await closeCrawler(); // 크롤러 종료 함수 호출
     process.exit(0);
 });
 
-// 다른 종료 신호 처리 (선택적)
+// 다른 종료 신호 처리 (선택적) - Interval 클리어 추가
 process.on('SIGTERM', async () => {
     console.log('SIGTERM signal received. Closing crawler and exiting...');
+     if (autoCrawlIntervalId) {
+        clearInterval(autoCrawlIntervalId); // 주기적 크롤링 중지
+        console.log("[종료] 자동 크롤링 Interval 중지됨.");
+    }
     await closeCrawler(); // 크롤러 종료 함수 호출
     process.exit(0);
 });
 
-// 처리되지 않은 예외 처리
+// 처리되지 않은 예외 처리 (기존 유지)
 process.on('uncaughtException', (error, origin) => {
     console.error(`\n\n========= UNCAUGHT EXCEPTION =========`);
     console.error(`Origin: ${origin}`);
     console.error(error);
     console.error(`======================================`);
-    // 여기서 크롤러를 닫는 것은 문제의 원인일 수 있으므로 피합니다.
+    // 자동 크롤링 Interval 정리 시도 (선택적)
+    if (autoCrawlIntervalId) clearInterval(autoCrawlIntervalId);
     // 프로세스 관리자가 재시작하도록 프로세스를 종료합니다.
     process.exit(1); // 로깅 후 종료
 });
 
-// 처리되지 않은 프로미스 거부 처리 (수정됨: closeCrawler 호출 제거)
+// 처리되지 않은 프로미스 거부 처리 (기존 유지)
 process.on('unhandledRejection', (reason, promise) => {
     console.error(`\n\n======= UNHANDLED REJECTION ========`);
     console.error('Promise:', promise);
     console.error('Reason:', reason);
     console.error(`======================================`);
-    // 여기서 크롤러를 닫지 않습니다. 개별 크롤링 함수가 오류를 처리해야 합니다.
-    // process.exit(1); // 필요에 따라 종료하거나, 치명적이지 않다고 판단되면 앱을 계속 실행할 수도 있습니다.
+    // 여기서 크롤러를 닫거나 Interval을 정리하는 것은 위험할 수 있음
 });
