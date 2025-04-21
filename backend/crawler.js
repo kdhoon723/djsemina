@@ -95,6 +95,10 @@ export async function initializeCrawler() {
              sessionIntervalId = null;
              return;
         }
+        // 세션 갱신 전 현재 URL 로깅 (디버깅용)
+        const currentUrlBeforeRenew = sessionPage.url();
+        console.log(`[세션] 갱신 전 URL: ${currentUrlBeforeRenew}`);
+
         await sessionPage.evaluate(() => {
             // home_renew_session_ajax 함수가 window 객체에 직접 정의되어 있다고 가정
             if (typeof home_renew_session_ajax === 'function') {
@@ -103,7 +107,18 @@ export async function initializeCrawler() {
                 console.error('home_renew_session_ajax function not found on window');
             }
         });
-        console.log("[세션] 자동 갱신 완료");
+        // 세션 갱신 후 잠시 대기 (필요시) 및 URL 확인
+        await sleep(1000); // AJAX 처리를 위한 짧은 대기
+        const currentUrlAfterRenew = sessionPage.url();
+        console.log(`[세션] 갱신 후 URL: ${currentUrlAfterRenew}`);
+
+        // 만약 갱신 후 로그인 페이지 등으로 이동했다면 경고
+        if (!currentUrlAfterRenew.includes("library.daejin.ac.kr")) { // 로그인 페이지 URL 패턴 확인 필요
+             console.warn("[세션] 자동 갱신 후 예상치 못한 페이지로 이동했을 수 있습니다.");
+        } else {
+            console.log("[세션] 자동 갱신 완료");
+        }
+
       } catch (err) {
         console.error("[세션] 자동 갱신 중 오류 발생:", err.message);
         if (err.message.includes('Target closed') || err.message.includes('Session closed') || err.message.includes('Navigation failed because browser has disconnected')) {
@@ -254,7 +269,7 @@ async function crawlSingleRoomPage(room, dateStr, cookies) {
                return options.length > 0 && Array.from(options).some(opt => /^\d{1,2}:\d{2}$/.test(opt.textContent.trim()));
             });
 
-             // 전체 옵션 개수 가져오기 (optionsLoaded 평가 로직 안으로 이동하거나 별도 실행)
+             // 전체 옵션 개수 가져오기
              totalOpt = await startTimeElement.evaluate(() => document.querySelectorAll("#start_time option").length);
 
         } else {
@@ -281,7 +296,6 @@ async function crawlSingleRoomPage(room, dateStr, cookies) {
         let starts = await startTimeElement.$$eval("option", (opts) =>
           opts.map((el) => el.textContent.trim()).filter(t => t) // 빈 텍스트 제거
         );
-        // const totalOpt = starts.length; // totalOpt는 위에서 이미 계산됨
 
         // 유효한 시간 형식 필터링 및 과거 시간 필터링
         starts = starts.filter((t) => HHMM.test(t));
@@ -319,12 +333,6 @@ async function crawlSingleRoomPage(room, dateStr, cookies) {
 export async function crawl(dateStr) {
   if (!browser || !sessionPage || sessionPage.isClosed() || !browser.isConnected()) {
     console.error("크롤러 비정상 상태 감지. 재초기화 필요.");
-    // 필요시 여기서 자동으로 재초기화 로직 호출 가능
-    // await closeCrawler();
-    // await initializeCrawler();
-    // if (!browser || !sessionPage || sessionPage.isClosed()) {
-    //    throw new Error("크롤러 재초기화 실패.");
-    // }
     throw new Error("크롤러가 초기화되지 않았거나 비정상 상태입니다. 서버 관리자에게 문의하세요.");
   }
   console.log(`🚀 [크롤] 시작: ${dateStr}`);
@@ -337,6 +345,28 @@ export async function crawl(dateStr) {
     await sessionPage.goto("https://library.daejin.ac.kr/seminar_seminar_list.mir", {
       waitUntil: "domcontentloaded",
     });
+
+    // *** 추가된 부분: 현재 URL 확인하여 로그인 페이지 여부 판단 ***
+    const currentPageUrl = sessionPage.url();
+    console.log(`[크롤] 현재 sessionPage URL: ${currentPageUrl}`);
+    if (!currentPageUrl.includes("seminar_seminar_list.mir")) {
+        console.error("[크롤] 세미나 목록 페이지가 아닌 다른 페이지로 이동됨 (로그인 풀림 가능성)");
+        throw new Error("세션이 만료되었거나 예기치 않은 페이지 이동 발생");
+    }
+    // *** 추가된 부분 끝 ***
+
+    console.log("[크롤] 날짜 입력 필드(#open_btn) 대기...");
+    try {
+        await sessionPage.waitForSelector("#open_btn", { timeout: 10000 });
+    } catch (error) {
+        console.error("[크롤] 날짜 입력 필드(#open_btn)를 시간 내에 찾지 못했습니다.");
+        const pageContentForDebug = await sessionPage.content(); // 디버깅 위해 현재 페이지 내용 로깅
+        console.error("현재 페이지 내용:", pageContentForDebug.substring(0, 500) + "..."); // 너무 길지 않게 일부만 로깅
+        throw new Error("세미나 목록 페이지 로드 실패 또는 날짜 필드 없음");
+    }
+    console.log("[크롤] 날짜 입력 필드 확인됨.");
+
+
     console.log(`[크롤] 날짜 필터 설정: ${dateStr}`);
     const dateSet = await sessionPage.evaluate((d) => {
       const inp = document.getElementById("open_btn");
@@ -349,16 +379,15 @@ export async function crawl(dateStr) {
     }, dateStr);
 
     if (!dateSet) {
-        throw new Error("[크롤] 날짜 입력 필드(#open_btn)를 찾을 수 없습니다.");
+        throw new Error("[크롤] 날짜 필드 설정 실패 (evaluate 로직 오류 가능성)");
     }
-
 
     // 예약 링크 로딩 대기
     console.log("[크롤] 예약 링크 로딩 대기...");
     try {
         await sessionPage.waitForFunction(
             () => document.querySelectorAll("a[onclick*='seminar_resv']").length > 0,
-            { timeout: 15000 } // 대기 시간 증가
+            { timeout: 15000 }
         );
     } catch (e) {
         console.warn("[크롤] 해당 날짜에 예약 가능한 방이 없거나 로딩에 실패했습니다.");
@@ -369,15 +398,15 @@ export async function crawl(dateStr) {
     const rooms = await sessionPage.$$eval("a[onclick*='seminar_resv']", (links) =>
       links.map((a) => {
         const onclickAttr = a.getAttribute("onclick");
-        if (!onclickAttr) return null; // onclick 속성이 없는 경우 건너뛰기
+        if (!onclickAttr) return null;
         const m = onclickAttr.match(/'[^']*'\s*,\s*'([^']+)'\s*,\s*'([^']+)'\s*,\s*'([^']+)'/);
-         if (!m || m.length < 4) return null; // 매칭 실패 시 건너뛰기
+         if (!m || m.length < 4) return null;
         return {
           cate_cd: m[2],
           room_cd: m[3],
-          title: a.textContent?.replace(/\s+/g, " ").trim() || '제목 없음', // null 처리 및 기본값
+          title: a.textContent?.replace(/\s+/g, " ").trim() || '제목 없음',
         };
-      }).filter(Boolean) // null인 항목 제거
+      }).filter(Boolean)
     );
     console.log(`[크롤] 총 ${rooms.length}개 방 발견`);
 
@@ -386,15 +415,15 @@ export async function crawl(dateStr) {
         return [];
     }
 
-    // 2) 병렬 크롤링 (발견된 모든 방 동시 실행)
+    // 2) 병렬 크롤링
     console.log(`[크롤] ${rooms.length}개 방 병렬 크롤링 시작...`);
-    const cookies = await sessionPage.cookies(); // 현재 세션 쿠키 가져오기
+    const cookies = await sessionPage.cookies();
 
     const crawlPromises = rooms.map(room => crawlSingleRoomPage(room, dateStr, cookies));
     const results = await Promise.all(crawlPromises);
 
     // 3) 결과 정리
-    const successfulResults = results.filter(Boolean); // null (실패한 결과) 제거
+    const successfulResults = results.filter(Boolean);
     const failedCount = rooms.length - successfulResults.length;
     const duration = (Date.now() - overallStartTime) / 1000;
     console.log(`✅ [크롤] 완료: 총 ${successfulResults.length}개 방 정보 수집 성공, ${failedCount}개 실패 (${duration.toFixed(1)}초 소요)`);
@@ -404,7 +433,6 @@ export async function crawl(dateStr) {
   } catch (error) {
     const duration = (Date.now() - overallStartTime) / 1000;
     console.error(`❌ [크롤] 전체 작업 실패 (${duration.toFixed(1)}초 소요):`, error);
-    // 에러 발생 시 빈 배열 반환 또는 에러 다시 던지기 선택
     return [];
     // throw error;
   }
