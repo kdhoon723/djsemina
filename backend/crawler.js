@@ -18,7 +18,7 @@ const plus30 = (t) => {
   const d = new Date();
   d.setHours(h, m + TERM_MIN, 0, 0);
   return `${d.getHours().toString().padStart(2, "0")}:` +
-         `${d.getMinutes().toString().padStart(2, "0")}`;
+    `${d.getMinutes().toString().padStart(2, "0")}`;
 };
 const pastToday = (t) => {
   const now = new Date();
@@ -39,7 +39,7 @@ async function blockAssets(page) {
  * @param {string} dateStr  YYYY-MM-DD
  * @param {(pct: number)=>void} onProgress
  */
-export async function crawl(dateStr, onProgress = () => {}) {
+export async function crawl(dateStr, onProgress = () => { }) {
   console.log(`🚀 [크롤] 시작: ${dateStr}`);
   onProgress(1);
 
@@ -119,7 +119,7 @@ export async function crawl(dateStr, onProgress = () => {}) {
     let results = [];
     for (let i = 0; i < total; i += PARALLEL) {
       const chunk = rooms.slice(i, i + PARALLEL);
-      console.log(`[단계 4] ${i+1}번 방부터 ${Math.min(i+PARALLEL, total)}번 방 크롤링`);
+      console.log(`[단계 4] ${i + 1}번 방부터 ${Math.min(i + PARALLEL, total)}번 방 크롤링`);
       const part = await Promise.all(
         chunk.map((r) => crawlRoom(browser, r, dateStr))
       );

@@ -60,6 +60,7 @@
         <div v-if="loading" class="status-card loading">
           <v-progress-circular indeterminate color="primary" class="loader"></v-progress-circular>
           <p>데이터를 불러오는 중입니다...</p>
+            <p class="hint">20초 정도 소요됩니다...</p>
         </div>
         
         <div v-else-if="error" class="status-card error">
