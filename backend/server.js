@@ -15,7 +15,8 @@ app.use(cors());
 // 메모리 캐시: { date: { ts, data, fetchedAt } }
 const cache = new Map();
 
-// --- 자동 크롤링 설정 ---\nconst AUTO_CRAWL_INTERVAL_MS = 10 * 60 * 1000; // 10분
+// --- 자동 크롤링 설정 ---
+const AUTO_CRAWL_INTERVAL_MS = 10 * 60 * 1000; // 10분
 let autoCrawlIntervalId = null;
 let isCrawlerReady = false; // 크롤러 초기화 상태 플래그
 
@@ -64,10 +65,12 @@ async function runAutoCrawl() {
 }
 
 
-// --- API 라우트 수정 ---\n// '/api/availability' 엔드포인트: 최신 캐시 반환 또는 강제 크롤링
+// --- API 라우트 수정 ---
+// '/api/availability' 엔드포인트: 최신 캐시 반환 또는 강제 크롤링
 app.get("/api/availability", async (req, res) => {
     // *** API 요청 시 날짜 결정 로직은 기존 유지 (프론트에서 명시적 요청) ***
-    const date = req.query.date || getTargetDateForAutoCrawl(); // 기본값을 자동 크롤링 대상 날짜로 설정 (선택적 개선)
+    // 기본값을 자동 크롤링 대상 날짜로 설정하면, 프론트 첫 로딩 시 백엔드 자동 크롤링과 같은 날짜를 보게 됨
+    const date = req.query.date || getTargetDateForAutoCrawl();
     const forceCrawl = req.query._ts !== undefined; // _ts 파라미터가 있으면 강제 크롤링 (롱 프레스용)
     const entry = cache.get(date); // 요청된 날짜의 캐시 확인
 
@@ -167,10 +170,12 @@ app.get("/api/crawl", async (req, res) => {
         isCrawlerReady = true; // 크롤러 준비 완료 상태로 설정
 
         // 초기화 성공 시 즉시 오늘 데이터 크롤링 한번 실행 (서버 시작 시 최신 데이터 확보)
-        console.log("[초기 실행] 서버 시작 후 첫 자동 크롤링 실행 (대상 날짜 계산)..");
+        console.log("[초기 실행] 서버 시작 후 첫 자동 크롤링 실행 (대상 날짜 계산)...");
+        // *** 수정된 부분: 수정된 runAutoCrawl 호출 ***
         await runAutoCrawl(); // 첫 크롤링 실행 (수정된 로직으로 대상 날짜 계산)
 
         // 주기적 크롤링 시작 (첫 실행 후 설정)
+        // *** 수정된 부분: AUTO_CRAWL_INTERVAL_MS 변수 사용 확인 ***
         console.log(`[Auto Crawl] ${AUTO_CRAWL_INTERVAL_MS / 60000}분 간격으로 자동 크롤링 설정.`);
         autoCrawlIntervalId = setInterval(runAutoCrawl, AUTO_CRAWL_INTERVAL_MS);
 
