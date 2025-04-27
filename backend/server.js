@@ -15,13 +15,29 @@ app.use(cors());
 // 메모리 캐시: { date: { ts, data, fetchedAt } }
 const cache = new Map();
 
-// --- 자동 크롤링 설정 ---
-const AUTO_CRAWL_INTERVAL_MS = 10 * 60 * 1000; // 10분
+// --- 자동 크롤링 설정 ---\nconst AUTO_CRAWL_INTERVAL_MS = 10 * 60 * 1000; // 10분
 let autoCrawlIntervalId = null;
 let isCrawlerReady = false; // 크롤러 초기화 상태 플래그
 
 /**
- * 주기적으로 오늘 날짜의 데이터를 크롤링하고 캐시를 업데이트하는 함수
+ * 크롤링 대상 날짜를 결정하는 함수 (프런트엔드 로직과 유사하게)
+ * 현재 시간이 오후 8시 (20시) 이후면 다음날을, 아니면 오늘 날짜를 YYYY-MM-DD 형식으로 반환
+ */
+function getTargetDateForAutoCrawl() {
+    const now = new Date();
+    // 서버 시간 기준으로 20시 체크 (필요시 특정 타임존 적용 고려, 예: KST)
+    if (now.getHours() >= 20) {
+        const tomorrow = new Date(now);
+        tomorrow.setDate(now.getDate() + 1);
+        return tomorrow.toISOString().slice(0, 10);
+    } else {
+        return now.toISOString().slice(0, 10);
+    }
+}
+
+
+/**
+ * 주기적으로 대상 날짜의 데이터를 크롤링하고 캐시를 업데이트하는 함수
  */
 async function runAutoCrawl() {
     // 크롤러가 준비되지 않았으면 실행하지 않음
@@ -29,27 +45,29 @@ async function runAutoCrawl() {
         console.log("[Auto Crawl] 크롤러가 아직 준비되지 않았습니다. 다음 주기에 시도합니다.");
         return;
     }
-    const todayDate = new Date().toISOString().slice(0, 10);
-    console.log(`[Auto Crawl] 주기적 크롤링 시작: ${todayDate}`);
+    // *** 수정된 부분: 프런트엔드 로직에 맞춰 크롤링 대상 날짜 결정 ***
+    const targetDate = getTargetDateForAutoCrawl();
+    console.log(`[Auto Crawl] 주기적 크롤링 시작: 대상 날짜=${targetDate}`);
     try {
         const fetchedAt = new Date().toISOString();
-        const rooms = await crawl(todayDate); // 항상 오늘 날짜로 크롤링
+        // *** 수정된 부분: 계산된 targetDate로 크롤링 ***
+        const rooms = await crawl(targetDate);
 
         // 새 데이터 캐시 저장
-        console.log(`[Auto Crawl] 크롤링 완료. 캐시 저장: ${todayDate}, ${rooms.length} rooms`);
-        cache.set(todayDate, { ts: Date.now(), data: rooms, fetchedAt });
+        console.log(`[Auto Crawl] 크롤링 완료. 캐시 저장: ${targetDate}, ${rooms.length} rooms`);
+        cache.set(targetDate, { ts: Date.now(), data: rooms, fetchedAt });
 
     } catch (error) {
-        console.error(`[Auto Crawl] 주기적 크롤링 중 오류 발생 (${todayDate}):`, error.message);
+        console.error(`[Auto Crawl] 주기적 크롤링 중 오류 발생 (${targetDate}):`, error.message);
         // 여기서 에러가 발생해도 다음 주기에 다시 시도
     }
 }
 
 
-// --- API 라우트 수정 ---
-// '/api/availability' 엔드포인트: 최신 캐시 반환 또는 강제 크롤링
+// --- API 라우트 수정 ---\n// '/api/availability' 엔드포인트: 최신 캐시 반환 또는 강제 크롤링
 app.get("/api/availability", async (req, res) => {
-    const date = req.query.date || new Date().toISOString().slice(0, 10);
+    // *** API 요청 시 날짜 결정 로직은 기존 유지 (프론트에서 명시적 요청) ***
+    const date = req.query.date || getTargetDateForAutoCrawl(); // 기본값을 자동 크롤링 대상 날짜로 설정 (선택적 개선)
     const forceCrawl = req.query._ts !== undefined; // _ts 파라미터가 있으면 강제 크롤링 (롱 프레스용)
     const entry = cache.get(date); // 요청된 날짜의 캐시 확인
 
@@ -115,6 +133,7 @@ app.get("/api/availability", async (req, res) => {
 
 // '/api/crawl' 엔드포인트는 유지 (디버깅 또는 특정 목적용)
 app.get("/api/crawl", async (req, res) => {
+    // '/api/crawl' 직접 호출 시 날짜는 요청 파라미터 또는 오늘 날짜 기준 (기존 동작 유지)
     const date = req.query.date || new Date().toISOString().slice(0, 10);
     console.log(`[API /crawl] 직접 크롤링 요청 수신: date=${date}`);
     try {
@@ -148,8 +167,8 @@ app.get("/api/crawl", async (req, res) => {
         isCrawlerReady = true; // 크롤러 준비 완료 상태로 설정
 
         // 초기화 성공 시 즉시 오늘 데이터 크롤링 한번 실행 (서버 시작 시 최신 데이터 확보)
-        console.log("[초기 실행] 서버 시작 후 첫 자동 크롤링 실행 (오늘 날짜)...");
-        await runAutoCrawl(); // 첫 크롤링 실행
+        console.log("[초기 실행] 서버 시작 후 첫 자동 크롤링 실행 (대상 날짜 계산)..");
+        await runAutoCrawl(); // 첫 크롤링 실행 (수정된 로직으로 대상 날짜 계산)
 
         // 주기적 크롤링 시작 (첫 실행 후 설정)
         console.log(`[Auto Crawl] ${AUTO_CRAWL_INTERVAL_MS / 60000}분 간격으로 자동 크롤링 설정.`);
