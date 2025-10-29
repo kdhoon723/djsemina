@@ -1,0 +1,7 @@
+{
+  "nodeModulesDir": "auto",
+  "imports": {
+    "got": "npm:got@14",
+    "tough-cookie": "npm:tough-cookie@5"
+  }
+}
