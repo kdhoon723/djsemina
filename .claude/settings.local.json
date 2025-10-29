@@ -46,7 +46,8 @@
       "mcp__supabase__get_project_url",
       "mcp__supabase__get_anon_key",
       "mcp__supabase__get_logs",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$(cat <<''EOF''\nfeat: Supabase Edge Function 배포 성공 - npm:got을 Deno에서 직접 사용\n\n## 주요 성과\n- ✅ Deno에서 npm:got + tough-cookie 작동 확인\n- ✅ Supabase Edge Function에 세미나실 크롤러 배포 성공\n- ✅ Node.js 코드 95% 재사용 (거의 그대로 이식)\n- ✅ SSO 로그인 + 세미나실 목록 20개 파싱 성공\n\n## 추가된 파일\n### 문서\n- SUPABASE_EDGE_DEPLOYMENT.md: 전체 배포 과정 및 결과\n- SUPABASE_EDGE_ANALYSIS.md: 기술 분석 문서\n- DEPLOYMENT_COMPARISON.md: 배포 방식 비교\n- DENO_TEST_INSTRUCTIONS.md: Deno 테스트 가이드\n\n### 코드\n- api-crawler.js: Node.js got 기반 크롤러\n- api-crawler-deno.ts: Deno 네이티브 라이브러리 버전\n- api-crawler-deno-got.ts: Deno에서 npm:got 사용 버전\n- edge-function-index.ts: Supabase Edge Function 배포 코드 (v2)\n\n### 테스트\n- test-deno-got.ts: npm:got import 테스트\n- test-deno-full-login.ts: 전체 로그인 플로우 테스트\n- test-got-login.js: got 라이브러리 로그인 테스트\n- test-crawler.js: 크롤러 테스트\n\n### 설정\n- .claude/settings.local.json: Claude Code MCP 설정\n- deno.json, deno.lock: Deno 프로젝트 설정\n- package.json: got, cheerio 등 패키지 추가\n\n## 기술적 의의\nDeno의 npm: 접두사를 통해 Node.js 라이브러리를 Edge Runtime에서 \n직접 사용할 수 있음을 검증. 서버리스 아키텍처로 전환 가능.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")"
     ],
     "deny": [],
     "ask": []
