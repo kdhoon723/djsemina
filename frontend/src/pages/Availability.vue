@@ -265,13 +265,66 @@ const filteredRooms = computed(() => {
 });
 
 /**
- * 캐시를 먼저 표시하고 백그라운드에서 업데이트
+ * LocalStorage 저장/읽기
+ */
+const STORAGE_PREFIX = 'djsemina_data_';
+const STORAGE_EXPIRY = 24 * 60 * 60 * 1000; // 24시간
+
+function saveToLocalStorage(dateStr, data) {
+  try {
+    const storageData = {
+      rooms: data.rooms,
+      fetchedAt: data.fetchedAt,
+      cached: data.cached,
+      timestamp: Date.now()
+    };
+    localStorage.setItem(STORAGE_PREFIX + dateStr, JSON.stringify(storageData));
+  } catch (e) {
+    console.warn('LocalStorage 저장 실패:', e);
+  }
+}
+
+function loadFromLocalStorage(dateStr) {
+  try {
+    const stored = localStorage.getItem(STORAGE_PREFIX + dateStr);
+    if (!stored) return null;
+
+    const data = JSON.parse(stored);
+
+    // 24시간 이상 오래된 데이터는 삭제
+    if (Date.now() - data.timestamp > STORAGE_EXPIRY) {
+      localStorage.removeItem(STORAGE_PREFIX + dateStr);
+      return null;
+    }
+
+    return data;
+  } catch (e) {
+    console.warn('LocalStorage 읽기 실패:', e);
+    return null;
+  }
+}
+
+/**
+ * LocalStorage 먼저 표시하고 백그라운드에서 서버 데이터 가져오기
  */
 async function fetchLatestCached() {
-  loading.value = true;
   forceCrawlLoading.value = false;
   error.value = "";
 
+  // 1단계: LocalStorage에서 즉시 로드 (스피너 없음)
+  const localData = loadFromLocalStorage(date.value);
+  if (localData) {
+    rooms.value = Array.isArray(localData.rooms) ? localData.rooms : [];
+    fetchedAt.value = localData.fetchedAt;
+    isCachedData.value = true;
+    loading.value = false;
+    console.log('[LocalStorage] 즉시 표시:', localData.rooms.length, '개 방');
+  } else {
+    // LocalStorage에 데이터가 없으면 스피너 표시
+    loading.value = true;
+  }
+
+  // 2단계: 백그라운드로 서버 캐시 확인
   try {
     const cacheRes = await api.post('/library-crawler', {
       userId: import.meta.env.VITE_USER_ID,
@@ -281,11 +334,27 @@ async function fetchLatestCached() {
     });
 
     if (cacheRes.data.success && cacheRes.data.cached) {
-      rooms.value = Array.isArray(cacheRes.data.rooms) ? cacheRes.data.rooms : [];
-      fetchedAt.value = cacheRes.data.fetchedAt || cacheRes.data.date;
-      isCachedData.value = true;
+      const serverRooms = Array.isArray(cacheRes.data.rooms) ? cacheRes.data.rooms : [];
+      const serverFetchedAt = cacheRes.data.fetchedAt || cacheRes.data.date;
+
+      // LocalStorage 업데이트
+      saveToLocalStorage(date.value, {
+        rooms: serverRooms,
+        fetchedAt: serverFetchedAt,
+        cached: true
+      });
+
+      // 화면 업데이트 (LocalStorage 데이터와 다른 경우만)
+      if (!localData || localData.fetchedAt !== serverFetchedAt) {
+        rooms.value = serverRooms;
+        fetchedAt.value = serverFetchedAt;
+        isCachedData.value = true;
+        console.log('[Server Cache] 업데이트:', serverRooms.length, '개 방');
+      }
+
       loading.value = false;
 
+      // 3단계: 백그라운드로 실시간 데이터 가져오기
       try {
         const realtimeRes = await api.post('/library-crawler', {
           userId: import.meta.env.VITE_USER_ID,
@@ -295,14 +364,26 @@ async function fetchLatestCached() {
         });
 
         if (realtimeRes.data.success) {
-          rooms.value = Array.isArray(realtimeRes.data.rooms) ? realtimeRes.data.rooms : [];
-          fetchedAt.value = realtimeRes.data.fetchedAt;
+          const realtimeRooms = Array.isArray(realtimeRes.data.rooms) ? realtimeRes.data.rooms : [];
+          const realtimeFetchedAt = realtimeRes.data.fetchedAt;
+
+          // LocalStorage 업데이트
+          saveToLocalStorage(date.value, {
+            rooms: realtimeRooms,
+            fetchedAt: realtimeFetchedAt,
+            cached: false
+          });
+
+          rooms.value = realtimeRooms;
+          fetchedAt.value = realtimeFetchedAt;
           isCachedData.value = false;
+          console.log('[Realtime] 최종 업데이트:', realtimeRooms.length, '개 방');
         }
       } catch (bgError) {
         console.warn('백그라운드 업데이트 실패:', bgError);
       }
     } else {
+      // 캐시가 없으면 실시간 크롤링
       const res = await api.post('/library-crawler', {
         userId: import.meta.env.VITE_USER_ID,
         userPw: import.meta.env.VITE_USER_PW,
@@ -310,8 +391,18 @@ async function fetchLatestCached() {
         useCache: false
       });
 
-      rooms.value = Array.isArray(res.data.rooms) ? res.data.rooms : [];
-      fetchedAt.value = res.data.fetchedAt || res.data.date;
+      const realtimeRooms = Array.isArray(res.data.rooms) ? res.data.rooms : [];
+      const realtimeFetchedAt = res.data.fetchedAt || res.data.date;
+
+      // LocalStorage 저장
+      saveToLocalStorage(date.value, {
+        rooms: realtimeRooms,
+        fetchedAt: realtimeFetchedAt,
+        cached: false
+      });
+
+      rooms.value = realtimeRooms;
+      fetchedAt.value = realtimeFetchedAt;
       isCachedData.value = false;
       loading.value = false;
     }
@@ -338,8 +429,19 @@ async function forceRealtimeCrawl() {
       date: date.value,
       useCache: false
     });
-    rooms.value = Array.isArray(res.data.rooms) ? res.data.rooms : [];
-    fetchedAt.value = res.data.fetchedAt || res.data.date;
+
+    const realtimeRooms = Array.isArray(res.data.rooms) ? res.data.rooms : [];
+    const realtimeFetchedAt = res.data.fetchedAt || res.data.date;
+
+    // LocalStorage에 저장
+    saveToLocalStorage(date.value, {
+      rooms: realtimeRooms,
+      fetchedAt: realtimeFetchedAt,
+      cached: false
+    });
+
+    rooms.value = realtimeRooms;
+    fetchedAt.value = realtimeFetchedAt;
     isCachedData.value = false;
   } catch (e) {
     error.value = e.response?.data?.error || e.message || "실시간 데이터를 불러오는 중 오류가 발생했습니다.";
