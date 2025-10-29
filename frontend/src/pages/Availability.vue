@@ -166,19 +166,24 @@ return filter.value === "ALL"
 
 /**
 * 최신 캐시된 데이터를 가져오는 함수 (기존 fetchCached 역할)
+* Supabase Edge Function은 항상 실시간 크롤링
 */
 async function fetchLatestCached() {
 loading.value = true; // 일반 로딩 시작
 forceCrawlLoading.value = false; // 강제 크롤링 로딩 해제
 error.value = "";
 try {
-  // _ts 파라미터 없이 요청하여 캐시된 데이터 요청
-  const res = await api.get(`/api/availability?date=${date.value}`);
+  // Supabase Edge Function POST 요청
+  const res = await api.post('/library-crawler', {
+    userId: import.meta.env.VITE_USER_ID,
+    userPw: import.meta.env.VITE_USER_PW,
+    date: date.value
+  });
   rooms.value = Array.isArray(res.data.rooms) ? res.data.rooms : [];
-  fetchedAt.value = res.data.fetchedAt || "";
-  isCachedData.value = res.data.cached ?? true; // 응답에 cached 필드가 있으면 사용, 없으면 true
+  fetchedAt.value = res.data.date || ""; // fetchedAt → date로 변경
+  isCachedData.value = false; // Supabase는 항상 실시간
 } catch (e) {
-  error.value = e.response?.data?.message || e.message || "데이터를 불러오는 중 오류가 발생했습니다.";
+  error.value = e.response?.data?.error || e.message || "데이터를 불러오는 중 오류가 발생했습니다.";
   rooms.value = []; // 오류 시 방 목록 초기화
   fetchedAt.value = "";
 } finally {
@@ -188,21 +193,24 @@ try {
 
 /**
 * 실시간 크롤링을 강제로 요청하는 함수 (기존 fetchRealtime 역할)
+* Supabase Edge Function은 항상 실시간이므로 fetchLatestCached와 동일
 */
 async function forceRealtimeCrawl() {
 forceCrawlLoading.value = true; // 강제 크롤링 로딩 시작
 loading.value = false; // 일반 로딩 해제
 error.value = "";
 try {
-  // _ts 파라미터를 추가하여 강제 크롤링 요청
-  const res = await api.get(
-    `/api/availability?date=${date.value}&_ts=${Date.now()}`
-  );
+  // Supabase Edge Function POST 요청 (항상 실시간)
+  const res = await api.post('/library-crawler', {
+    userId: import.meta.env.VITE_USER_ID,
+    userPw: import.meta.env.VITE_USER_PW,
+    date: date.value
+  });
   rooms.value = Array.isArray(res.data.rooms) ? res.data.rooms : [];
-  fetchedAt.value = res.data.fetchedAt || "";
+  fetchedAt.value = res.data.date || ""; // fetchedAt → date로 변경
   isCachedData.value = false; // 강제로 가져왔으므로 캐시 아님
 } catch (e) {
-  error.value = e.response?.data?.message || e.message || "실시간 데이터를 불러오는 중 오류가 발생했습니다.";
+  error.value = e.response?.data?.error || e.message || "실시간 데이터를 불러오는 중 오류가 발생했습니다.";
   rooms.value = []; // 오류 시 방 목록 초기화
   fetchedAt.value = "";
 } finally {
