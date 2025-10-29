@@ -16,19 +16,19 @@
             hide-details
             class="date-picker"
             bg-color="white"
+            :disabled="isHistoryMode"
           ></v-text-field>
-          <!-- 버튼 이벤트 핸들러 수정: mousedown, mouseup, mouseleave -->
           <v-btn
             @mousedown="handleButtonDown"
             @mouseup="handleButtonUp"
             @mouseleave="handleButtonLeave"
             :loading="loading || forceCrawlLoading"
+            :disabled="isHistoryMode"
             color="primary"
             prepend-icon="mdi-refresh"
             variant="elevated"
             class="refresh-btn"
           >
-            <!-- 버튼 텍스트는 그대로 유지 -->
             조회
           </v-btn>
         </div>
@@ -41,7 +41,9 @@
             <v-tooltip v-else activator="parent" location="top">수동으로 갱신된 정보</v-tooltip>
           </span>
           <v-btn
-            @click="openHistoryDialog"
+            v-if="!isHistoryMode"
+            @click="enterHistoryMode"
+            :loading="historyLoading"
             size="small"
             variant="text"
             prepend-icon="mdi-history"
@@ -49,8 +51,87 @@
           >
             히스토리
           </v-btn>
+          <v-btn
+            v-else
+            @click="exitHistoryMode"
+            size="small"
+            variant="text"
+            prepend-icon="mdi-close"
+            color="error"
+          >
+            히스토리 종료
+          </v-btn>
         </div>
       </div>
+
+      <!-- 히스토리 슬라이더 (메인 화면에 통합) -->
+      <transition name="slide-fade">
+        <div v-if="isHistoryMode" class="history-slider-section">
+          <v-divider class="my-4"></v-divider>
+
+          <div v-if="historyError" class="text-center py-4 text-error">
+            {{ historyError }}
+          </div>
+
+          <div v-else-if="allSnapshotsData.length === 0" class="text-center py-4 text-grey">
+            이 날짜의 히스토리가 없습니다.
+          </div>
+
+          <div v-else class="history-controls">
+            <div class="slider-container">
+              <div class="slider-header">
+                <v-icon size="small" color="primary">mdi-history</v-icon>
+                <span class="slider-title">타임라인</span>
+                <span class="slider-counter">{{ historySliderIndex + 1 }} / {{ allSnapshotsData.length }}</span>
+              </div>
+
+              <v-slider
+                v-model="historySliderIndex"
+                :min="0"
+                :max="allSnapshotsData.length - 1"
+                :step="1"
+                thumb-label="always"
+                color="primary"
+                track-color="grey-lighten-2"
+                @update:model-value="onSliderChange"
+                hide-details
+                class="history-slider"
+              >
+                <template v-slot:thumb-label="{ modelValue }">
+                  <div class="text-caption">
+                    {{ formatTime(allSnapshotsData[modelValue]?.fetched_at) }}
+                  </div>
+                </template>
+              </v-slider>
+            </div>
+
+            <!-- 재생 컨트롤 -->
+            <div class="playback-controls">
+              <v-btn
+                @click="historySliderIndex = 0"
+                icon="mdi-skip-backward"
+                variant="text"
+                size="small"
+                color="primary"
+              ></v-btn>
+              <v-btn
+                @click="playHistory"
+                :icon="isPlaying ? 'mdi-pause' : 'mdi-play'"
+                variant="tonal"
+                color="primary"
+                size="small"
+              ></v-btn>
+              <v-btn
+                @click="historySliderIndex = allSnapshotsData.length - 1"
+                icon="mdi-skip-forward"
+                variant="text"
+                size="small"
+                color="primary"
+              ></v-btn>
+            </div>
+          </div>
+        </div>
+      </transition>
 
       <div class="divider"></div>
 
@@ -72,17 +153,19 @@
     </div>
 
     <transition name="fade" mode="out-in">
-      <!-- 로딩 상태 표시: loading 또는 forceCrawlLoading일 때 -->
-      <div v-if="loading || forceCrawlLoading" class="status-card loading">
+      <!-- 로딩 상태 표시 -->
+      <div v-if="loading || forceCrawlLoading || historyLoading" class="status-card loading">
         <v-progress-circular indeterminate color="primary" class="loader"></v-progress-circular>
-        <p>{{ forceCrawlLoading ? '실시간 데이터를 강제로 불러오는 중입니다...' : '데이터를 불러오는 중입니다...' }}</p>
-          <p class="hint" v-if="forceCrawlLoading">약 20초 정도 소요될 수 있습니다...</p>
+        <p v-if="historyLoading">히스토리 데이터를 불러오는 중입니다...</p>
+        <p v-else-if="forceCrawlLoading">실시간 데이터를 강제로 불러오는 중입니다...</p>
+        <p v-else>데이터를 불러오는 중입니다...</p>
+        <p class="hint" v-if="forceCrawlLoading">약 20초 정도 소요될 수 있습니다...</p>
+        <p class="hint" v-if="historyLoading && allSnapshotsData.length > 0">{{ allSnapshotsData.length }}개의 스냅샷을 로드하는 중...</p>
       </div>
 
       <div v-else-if="error" class="status-card error">
         <v-icon color="error" size="large">mdi-alert-circle</v-icon>
         <p>{{ error }}</p>
-        <!-- 다시 시도 버튼은 일반 조회(캐시)를 하도록 함 -->
         <v-btn color="primary" @click="fetchLatestCached" variant="text">다시 시도</v-btn>
       </div>
 
@@ -117,104 +200,6 @@
         </div>
       </div>
     </transition>
-
-    <!-- 히스토리 슬라이더 다이얼로그 -->
-    <v-dialog v-model="historyDialog" max-width="900px" persistent>
-      <v-card>
-        <v-card-title class="d-flex justify-space-between align-center">
-          <div>
-            <span>{{ date }} 히스토리</span>
-            <span v-if="currentSnapshot" class="ml-4 text-subtitle-1 text-grey">
-              {{ new Date(currentSnapshot.fetched_at).toLocaleString('ko-KR') }}
-            </span>
-          </div>
-          <v-btn icon="mdi-close" variant="text" @click="closeHistoryDialog"></v-btn>
-        </v-card-title>
-        <v-card-text>
-          <div v-if="historyLoading" class="text-center py-8">
-            <v-progress-circular indeterminate color="primary"></v-progress-circular>
-            <p class="mt-4">히스토리를 불러오는 중...</p>
-          </div>
-          <div v-else-if="historyError" class="text-center py-8 text-error">
-            {{ historyError }}
-          </div>
-          <div v-else-if="historySnapshots.length === 0" class="text-center py-8 text-grey">
-            이 날짜의 히스토리가 없습니다.
-          </div>
-          <div v-else>
-            <!-- 히스토리 슬라이더 -->
-            <div class="history-slider-container px-4 py-6">
-              <div class="d-flex align-center gap-4">
-                <v-icon size="large" color="primary">mdi-history</v-icon>
-                <v-slider
-                  v-model="historySliderIndex"
-                  :min="0"
-                  :max="historySnapshots.length - 1"
-                  :step="1"
-                  thumb-label="always"
-                  color="primary"
-                  track-color="grey-lighten-2"
-                  @update:model-value="onSliderChange"
-                  hide-details
-                  class="flex-grow-1"
-                >
-                  <template v-slot:thumb-label="{ modelValue }">
-                    <div class="text-caption">
-                      {{ formatTime(historySnapshots[modelValue].fetched_at) }}
-                    </div>
-                  </template>
-                </v-slider>
-                <div class="text-caption text-grey">
-                  {{ historySliderIndex + 1 }} / {{ historySnapshots.length }}
-                </div>
-              </div>
-
-              <!-- 재생 컨트롤 -->
-              <div class="d-flex justify-center gap-2 mt-4">
-                <v-btn
-                  @click="playHistory"
-                  :icon="isPlaying ? 'mdi-pause' : 'mdi-play'"
-                  variant="tonal"
-                  color="primary"
-                  size="small"
-                ></v-btn>
-                <v-btn
-                  @click="historySliderIndex = 0"
-                  icon="mdi-skip-backward"
-                  variant="text"
-                  size="small"
-                ></v-btn>
-                <v-btn
-                  @click="historySliderIndex = historySnapshots.length - 1"
-                  icon="mdi-skip-forward"
-                  variant="text"
-                  size="small"
-                ></v-btn>
-              </div>
-            </div>
-
-            <!-- 현재 스냅샷 정보 -->
-            <v-divider class="my-4"></v-divider>
-            <div v-if="currentSnapshot" class="px-4">
-              <div class="d-flex justify-space-between align-center mb-4">
-                <div>
-                  <div class="text-subtitle-2 text-grey">총 {{ currentSnapshot.rooms?.length || 0 }}개 방</div>
-                </div>
-                <v-btn
-                  @click="applyHistorySnapshot"
-                  color="primary"
-                  variant="elevated"
-                  prepend-icon="mdi-check"
-                  size="small"
-                >
-                  이 시점으로 보기
-                </v-btn>
-              </div>
-            </div>
-          </div>
-        </v-card-text>
-      </v-card>
-    </v-dialog>
   </div>
 </template>
 
@@ -223,264 +208,236 @@ import { ref, computed, onMounted, watch } from "vue";
 import api from "@/api.js";
 import SlotTable from "@/components/SlotTable.vue";
 
-// --- 초기 날짜 계산 로직 추가 ---
+// --- 초기 날짜 계산 로직 ---
 function getInitialDate() {
-const now = new Date();
-const currentHour = now.getHours();
-let targetDate = new Date(now); // 현재 날짜로 초기화 (복사본 생성)
+  const now = new Date();
+  const currentHour = now.getHours();
+  let targetDate = new Date(now);
 
-// 현재 시간이 오후 8시(20시) 이후이면
-if (currentHour >= 20) {
-  targetDate.setDate(now.getDate() + 1); // 날짜를 하루 뒤로 설정
+  if (currentHour >= 20) {
+    targetDate.setDate(now.getDate() + 1);
+  }
+
+  const year = targetDate.getFullYear();
+  const month = String(targetDate.getMonth() + 1).padStart(2, '0');
+  const day = String(targetDate.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
-// 로컬 날짜를 YYYY-MM-DD 형식으로 변환 (UTC가 아닌 로컬 시간 기준)
-const year = targetDate.getFullYear();
-const month = String(targetDate.getMonth() + 1).padStart(2, '0');
-const day = String(targetDate.getDate()).padStart(2, '0');
-return `${year}-${month}-${day}`;
-}
-// --- 초기 날짜 계산 로직 끝 ---
-
-const date = ref(getInitialDate()); // 계산된 초기 날짜로 설정
+const date = ref(getInitialDate());
 const rooms = ref([]);
-const loading = ref(false); // 일반 로딩 (캐시 조회)
-const forceCrawlLoading = ref(false); // 강제 크롤링 로딩
+const loading = ref(false);
+const forceCrawlLoading = ref(false);
 const error = ref("");
 const fetchedAt = ref("");
-const isCachedData = ref(true); // 현재 표시된 데이터가 캐시된 데이터인지 여부
+const isCachedData = ref(true);
 const filter = ref("ALL");
 
-// 히스토리 관련 상태
-const historyDialog = ref(false);
+// 히스토리 모드 관련 상태
+const isHistoryMode = ref(false);
 const historyLoading = ref(false);
 const historyError = ref("");
-const historySnapshots = ref([]);
+const allSnapshotsData = ref([]); // 모든 스냅샷 데이터를 메모리에 저장
 const historySliderIndex = ref(0);
-const currentSnapshot = ref(null);
 const isPlaying = ref(false);
 let playInterval = null;
 
-// --- Long Press 관련 상태 ---
+// Long Press 관련 상태
 const longPressTimer = ref(null);
-const LONG_PRESS_DURATION = 5000; // 5초
+const LONG_PRESS_DURATION = 5000;
 
 const filterOptions = [
-{ label: "전체", value: "ALL" },
-{ label: "캐럴실", value: "C" },
-{ label: "세미나실", value: "S" },
-{ label: "소강당", value: "Z" },
+  { label: "전체", value: "ALL" },
+  { label: "캐럴실", value: "C" },
+  { label: "세미나실", value: "S" },
+  { label: "소강당", value: "Z" },
 ];
 
-// rooms 값이 배열이 아니면 빈 배열로 대체
 const roomList = computed(() =>
-Array.isArray(rooms.value) ? rooms.value : []
+  Array.isArray(rooms.value) ? rooms.value : []
 );
 
-// 필터링 시에도 안전하게 처리
 const filteredRooms = computed(() => {
-const arr = roomList.value;
-return filter.value === "ALL"
-  ? arr
-  : arr.filter(r => r.room_cd.startsWith(filter.value));
+  const arr = roomList.value;
+  return filter.value === "ALL"
+    ? arr
+    : arr.filter(r => r.room_cd.startsWith(filter.value));
 });
 
 /**
-* 캐시를 먼저 표시하고 백그라운드에서 업데이트
-* Stale-While-Revalidate 패턴
-*/
+ * 캐시를 먼저 표시하고 백그라운드에서 업데이트
+ */
 async function fetchLatestCached() {
-loading.value = true;
-forceCrawlLoading.value = false;
-error.value = "";
+  loading.value = true;
+  forceCrawlLoading.value = false;
+  error.value = "";
 
-try {
-  // 1단계: 캐시 조회 (즉시 표시)
-  const cacheRes = await api.post('/library-crawler', {
-    userId: import.meta.env.VITE_USER_ID,
-    userPw: import.meta.env.VITE_USER_PW,
-    date: date.value,
-    useCache: true
-  });
+  try {
+    const cacheRes = await api.post('/library-crawler', {
+      userId: import.meta.env.VITE_USER_ID,
+      userPw: import.meta.env.VITE_USER_PW,
+      date: date.value,
+      useCache: true
+    });
 
-  if (cacheRes.data.success && cacheRes.data.cached) {
-    // 캐시된 데이터 즉시 표시
-    rooms.value = Array.isArray(cacheRes.data.rooms) ? cacheRes.data.rooms : [];
-    fetchedAt.value = cacheRes.data.fetchedAt || cacheRes.data.date;
-    isCachedData.value = true;
-    loading.value = false; // 캐시 표시 후 로딩 종료
+    if (cacheRes.data.success && cacheRes.data.cached) {
+      rooms.value = Array.isArray(cacheRes.data.rooms) ? cacheRes.data.rooms : [];
+      fetchedAt.value = cacheRes.data.fetchedAt || cacheRes.data.date;
+      isCachedData.value = true;
+      loading.value = false;
 
-    // 2단계: 백그라운드에서 실시간 데이터 가져오기
-    try {
-      const realtimeRes = await api.post('/library-crawler', {
+      try {
+        const realtimeRes = await api.post('/library-crawler', {
+          userId: import.meta.env.VITE_USER_ID,
+          userPw: import.meta.env.VITE_USER_PW,
+          date: date.value,
+          useCache: false
+        });
+
+        if (realtimeRes.data.success) {
+          rooms.value = Array.isArray(realtimeRes.data.rooms) ? realtimeRes.data.rooms : [];
+          fetchedAt.value = realtimeRes.data.fetchedAt;
+          isCachedData.value = false;
+        }
+      } catch (bgError) {
+        console.warn('백그라운드 업데이트 실패:', bgError);
+      }
+    } else {
+      const res = await api.post('/library-crawler', {
         userId: import.meta.env.VITE_USER_ID,
         userPw: import.meta.env.VITE_USER_PW,
         date: date.value,
         useCache: false
       });
 
-      if (realtimeRes.data.success) {
-        // 새 데이터로 조용히 업데이트
-        rooms.value = Array.isArray(realtimeRes.data.rooms) ? realtimeRes.data.rooms : [];
-        fetchedAt.value = realtimeRes.data.fetchedAt;
-        isCachedData.value = false;
-      }
-    } catch (bgError) {
-      // 백그라운드 업데이트 실패는 무시 (캐시가 이미 표시됨)
-      console.warn('백그라운드 업데이트 실패:', bgError);
+      rooms.value = Array.isArray(res.data.rooms) ? res.data.rooms : [];
+      fetchedAt.value = res.data.fetchedAt || res.data.date;
+      isCachedData.value = false;
+      loading.value = false;
     }
-  } else {
-    // 캐시 없음 - 실시간 크롤링
+  } catch (e) {
+    error.value = e.response?.data?.error || e.message || "데이터를 불러오는 중 오류가 발생했습니다.";
+    rooms.value = [];
+    fetchedAt.value = "";
+    loading.value = false;
+  }
+}
+
+/**
+ * 실시간 크롤링 강제 요청
+ */
+async function forceRealtimeCrawl() {
+  forceCrawlLoading.value = true;
+  loading.value = false;
+  error.value = "";
+
+  try {
     const res = await api.post('/library-crawler', {
       userId: import.meta.env.VITE_USER_ID,
       userPw: import.meta.env.VITE_USER_PW,
       date: date.value,
       useCache: false
     });
-
     rooms.value = Array.isArray(res.data.rooms) ? res.data.rooms : [];
     fetchedAt.value = res.data.fetchedAt || res.data.date;
     isCachedData.value = false;
-    loading.value = false;
+  } catch (e) {
+    error.value = e.response?.data?.error || e.message || "실시간 데이터를 불러오는 중 오류가 발생했습니다.";
+    rooms.value = [];
+    fetchedAt.value = "";
+  } finally {
+    forceCrawlLoading.value = false;
   }
-} catch (e) {
-  error.value = e.response?.data?.error || e.message || "데이터를 불러오는 중 오류가 발생했습니다.";
-  rooms.value = [];
-  fetchedAt.value = "";
-  loading.value = false;
-}
 }
 
-/**
-* 실시간 크롤링 강제 요청 (롱프레스 시)
-*/
-async function forceRealtimeCrawl() {
-forceCrawlLoading.value = true;
-loading.value = false;
-error.value = "";
-try {
-  // 캐시 무시하고 실시간 크롤링
-  const res = await api.post('/library-crawler', {
-    userId: import.meta.env.VITE_USER_ID,
-    userPw: import.meta.env.VITE_USER_PW,
-    date: date.value,
-    useCache: false
-  });
-  rooms.value = Array.isArray(res.data.rooms) ? res.data.rooms : [];
-  fetchedAt.value = res.data.fetchedAt || res.data.date;
-  isCachedData.value = false;
-} catch (e) {
-  error.value = e.response?.data?.error || e.message || "실시간 데이터를 불러오는 중 오류가 발생했습니다.";
-  rooms.value = [];
-  fetchedAt.value = "";
-} finally {
-  forceCrawlLoading.value = false;
-}
-}
-
-// --- 버튼 이벤트 핸들러 ---
-
-/**
-* 버튼 누르기 시작 시: 타이머 설정
-*/
+// 버튼 이벤트 핸들러
 function handleButtonDown() {
-// 이미 진행 중인 로딩이 있으면 무시
-if (loading.value || forceCrawlLoading.value) return;
+  if (loading.value || forceCrawlLoading.value || isHistoryMode.value) return;
 
-// 기존 타이머가 있다면 제거
-if (longPressTimer.value) {
-  clearTimeout(longPressTimer.value);
-  longPressTimer.value = null;
-}
-
-// 롱프레스 타이머 설정
-longPressTimer.value = setTimeout(() => {
-  console.log("Long press detected!");
-  triggerLongPress();
-  longPressTimer.value = null; // 타이머 완료 후 초기화
-}, LONG_PRESS_DURATION);
-}
-
-/**
-* 버튼 떼기 시: 타이머가 아직 있으면 (롱프레스 안됨) 일반 조회 실행
-*/
-function handleButtonUp() {
-// 타이머가 아직 존재하면 (롱프레스 되기 전에 뗌)
-if (longPressTimer.value) {
-  clearTimeout(longPressTimer.value);
-  longPressTimer.value = null;
-  console.log("Short click detected!");
-  // 일반 조회 (캐시된 데이터 가져오기)
-  fetchLatestCached();
-}
-// 롱프레스가 이미 발동된 후 버튼을 떼는 경우는 아무것도 하지 않음
-}
-
-/**
-* 버튼 위에서 마우스 벗어날 시: 타이머 해제
-*/
-function handleButtonLeave() {
-if (longPressTimer.value) {
-  clearTimeout(longPressTimer.value);
-  longPressTimer.value = null;
-  console.log("Mouse left before long press.");
-}
-}
-
-/**
-* 롱프레스 감지 시 호출: 강제 실시간 크롤링 실행
-*/
-function triggerLongPress() {
-// 강제 실시간 크롤링 요청
-forceRealtimeCrawl();
-}
-
-
-// date가 바뀔 때마다 캐시된 데이터를 다시 불러옴
-watch(date, (newD, oldD) => {
-if (newD !== oldD) fetchLatestCached();
-});
-
-// 컴포넌트 마운트 시 날짜 재확인 및 데이터 로드
-onMounted(() => {
-  // 페이지 로드 시마다 날짜를 다시 계산 (F5, 새로고침 대응)
-  const correctDate = getInitialDate();
-  if (date.value !== correctDate) {
-    date.value = correctDate;
+  if (longPressTimer.value) {
+    clearTimeout(longPressTimer.value);
+    longPressTimer.value = null;
   }
-  fetchLatestCached();
-});
 
-// 시간 포맷 함수 (기존 유지)
-function formatTime(iso) {
-if (!iso) return "";
-const d = new Date(iso);
-const hh = String(d.getHours()).padStart(2, "0");
-const mm = String(d.getMinutes()).padStart(2, "0");
-const ss = String(d.getSeconds()).padStart(2, "0");
-return `${hh}:${mm}:${ss}`;
+  longPressTimer.value = setTimeout(() => {
+    console.log("Long press detected!");
+    triggerLongPress();
+    longPressTimer.value = null;
+  }, LONG_PRESS_DURATION);
 }
 
-// 히스토리 다이얼로그 열기
-async function openHistoryDialog() {
-  historyDialog.value = true;
+function handleButtonUp() {
+  if (longPressTimer.value) {
+    clearTimeout(longPressTimer.value);
+    longPressTimer.value = null;
+    console.log("Short click detected!");
+    fetchLatestCached();
+  }
+}
+
+function handleButtonLeave() {
+  if (longPressTimer.value) {
+    clearTimeout(longPressTimer.value);
+    longPressTimer.value = null;
+    console.log("Mouse left before long press.");
+  }
+}
+
+function triggerLongPress() {
+  forceRealtimeCrawl();
+}
+
+// 히스토리 모드 진입
+async function enterHistoryMode() {
   historyLoading.value = true;
   historyError.value = "";
-  historySnapshots.value = [];
+  allSnapshotsData.value = [];
   historySliderIndex.value = 0;
-  currentSnapshot.value = null;
 
   try {
-    const res = await api.get(`/library-history?date=${date.value}`);
-    if (res.data.success) {
-      historySnapshots.value = res.data.snapshots;
-      if (historySnapshots.value.length > 0) {
-        historySliderIndex.value = historySnapshots.value.length - 1; // 최신부터 시작
-        await loadSnapshotByIndex(historySliderIndex.value);
-      }
-    } else {
-      historyError.value = res.data.error || "히스토리를 불러올 수 없습니다.";
+    // 1단계: 스냅샷 목록 가져오기
+    const listRes = await api.get(`/library-history?date=${date.value}`);
+
+    if (!listRes.data.success) {
+      historyError.value = listRes.data.error || "히스토리를 불러올 수 없습니다.";
+      return;
     }
+
+    const snapshots = listRes.data.snapshots;
+
+    if (snapshots.length === 0) {
+      historyError.value = "";
+      allSnapshotsData.value = [];
+      isHistoryMode.value = true;
+      return;
+    }
+
+    // 2단계: 모든 스냅샷 데이터를 병렬로 로드
+    const snapshotPromises = snapshots.map(snapshot =>
+      api.get(`/library-snapshot?id=${snapshot.id}`)
+        .then(res => {
+          if (res.data.success) {
+            return res.data.snapshot;
+          }
+          return null;
+        })
+        .catch(err => {
+          console.error(`스냅샷 ${snapshot.id} 로드 실패:`, err);
+          return null;
+        })
+    );
+
+    const loadedSnapshots = await Promise.all(snapshotPromises);
+
+    // null이 아닌 것만 필터링
+    allSnapshotsData.value = loadedSnapshots.filter(s => s !== null);
+
+    if (allSnapshotsData.value.length > 0) {
+      historySliderIndex.value = allSnapshotsData.value.length - 1; // 최신부터 시작
+      applySnapshotToView(historySliderIndex.value);
+    }
+
+    isHistoryMode.value = true;
   } catch (e) {
     historyError.value = e.response?.data?.error || e.message || "히스토리 조회 중 오류가 발생했습니다.";
   } finally {
@@ -488,39 +445,30 @@ async function openHistoryDialog() {
   }
 }
 
-// 히스토리 다이얼로그 닫기
-function closeHistoryDialog() {
+// 히스토리 모드 종료
+function exitHistoryMode() {
   stopPlaying();
-  historyDialog.value = false;
+  isHistoryMode.value = false;
+  allSnapshotsData.value = [];
+  historySliderIndex.value = 0;
+  historyError.value = "";
+
+  // 현재 날짜의 최신 데이터로 복귀
+  fetchLatestCached();
 }
 
-// 슬라이더 인덱스로 스냅샷 로드
-async function loadSnapshotByIndex(index) {
-  if (index < 0 || index >= historySnapshots.value.length) return;
-
-  const snapshot = historySnapshots.value[index];
-  try {
-    const res = await api.get(`/library-snapshot?id=${snapshot.id}`);
-    if (res.data.success) {
-      currentSnapshot.value = res.data.snapshot;
-    }
-  } catch (e) {
-    console.error('스냅샷 로드 실패:', e);
-  }
+// 슬라이더 변경 - 즉시 반응 (API 호출 없음)
+function onSliderChange(newIndex) {
+  applySnapshotToView(newIndex);
 }
 
-// 슬라이더 변경 이벤트
-async function onSliderChange(newIndex) {
-  await loadSnapshotByIndex(newIndex);
-}
-
-// 현재 스냅샷을 메인 화면에 적용
-function applyHistorySnapshot() {
-  if (currentSnapshot.value) {
-    rooms.value = Array.isArray(currentSnapshot.value.rooms) ? currentSnapshot.value.rooms : [];
-    fetchedAt.value = currentSnapshot.value.fetchedAt;
+// 스냅샷을 화면에 적용
+function applySnapshotToView(index) {
+  if (index >= 0 && index < allSnapshotsData.value.length) {
+    const snapshot = allSnapshotsData.value[index];
+    rooms.value = Array.isArray(snapshot.rooms) ? snapshot.rooms : [];
+    fetchedAt.value = snapshot.fetched_at;
     isCachedData.value = true;
-    closeHistoryDialog();
   }
 }
 
@@ -533,16 +481,16 @@ function playHistory() {
   }
 }
 
-// 재생 시작
+// 재생 시작 - 더 빠르게 (200ms 간격)
 function startPlaying() {
   isPlaying.value = true;
   playInterval = setInterval(() => {
-    if (historySliderIndex.value < historySnapshots.value.length - 1) {
+    if (historySliderIndex.value < allSnapshotsData.value.length - 1) {
       historySliderIndex.value++;
     } else {
       stopPlaying();
     }
-  }, 1000); // 1초마다 다음 스냅샷
+  }, 200); // 200ms마다 다음 스냅샷 (부드러운 애니메이션)
 }
 
 // 재생 중지
@@ -552,6 +500,32 @@ function stopPlaying() {
     clearInterval(playInterval);
     playInterval = null;
   }
+}
+
+// date 변경 감지
+watch(date, (newD, oldD) => {
+  if (newD !== oldD && !isHistoryMode.value) {
+    fetchLatestCached();
+  }
+});
+
+// 컴포넌트 마운트
+onMounted(() => {
+  const correctDate = getInitialDate();
+  if (date.value !== correctDate) {
+    date.value = correctDate;
+  }
+  fetchLatestCached();
+});
+
+// 시간 포맷 함수
+function formatTime(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  const ss = String(d.getSeconds()).padStart(2, "0");
+  return `${hh}:${mm}:${ss}`;
 }
 </script>
 
@@ -606,11 +580,9 @@ function stopPlaying() {
   max-width: 160px;
 }
 
-/* 버튼 스타일 약간 조정 */
 .refresh-btn {
   height: 40px;
   font-weight: 500;
-  /* 사용자 선택 방지 (드래그 등) */
   user-select: none;
   -webkit-user-select: none;
   -moz-user-select: none;
@@ -622,6 +594,7 @@ function stopPlaying() {
   color: var(--text-light);
   display: flex;
   align-items: center;
+  gap: 8px;
 }
 
 .update-time {
@@ -634,6 +607,77 @@ function stopPlaying() {
   height: 1px;
   background-color: #e2e8f0;
   margin: 16px 0;
+}
+
+/* 히스토리 슬라이더 섹션 */
+.history-slider-section {
+  margin-top: 8px;
+}
+
+.history-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px;
+  background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+  border-radius: 12px;
+}
+
+.slider-container {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.slider-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+  color: var(--text);
+}
+
+.slider-title {
+  font-weight: 500;
+  flex: 1;
+}
+
+.slider-counter {
+  font-size: 0.85rem;
+  color: var(--text-light);
+  background-color: rgba(255, 255, 255, 0.8);
+  padding: 4px 12px;
+  border-radius: 12px;
+}
+
+.history-slider {
+  margin: 0;
+}
+
+.playback-controls {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 애니메이션 */
+.slide-fade-enter-active {
+  transition: all 0.3s ease-out;
+}
+
+.slide-fade-leave-active {
+  transition: all 0.2s ease-in;
+}
+
+.slide-fade-enter-from {
+  transform: translateY(-10px);
+  opacity: 0;
+}
+
+.slide-fade-leave-to {
+  transform: translateY(-5px);
+  opacity: 0;
 }
 
 .filter-section {
@@ -682,7 +726,7 @@ function stopPlaying() {
 }
 
 .status-card.error {
-  color: #ef4444; /* Vuetify error color */
+  color: #ef4444;
 }
 
 .status-card.empty {
@@ -741,11 +785,11 @@ function stopPlaying() {
 }
 
 .legend-color.available {
-  background-color: var(--success); /* Vuetify success color */
+  background-color: var(--success);
 }
 
 .legend-color.unavailable {
-  background-color: #e2e8f0; /* Tailwind gray-200 */
+  background-color: #e2e8f0;
 }
 
 .table-wrapper {
@@ -755,7 +799,6 @@ function stopPlaying() {
   overflow: hidden;
 }
 
-/* 애니메이션 (기존 유지) */
 .fade-enter-active,
 .fade-leave-active {
   transition: opacity 0.3s ease;
@@ -790,23 +833,13 @@ function stopPlaying() {
   .page-title {
     font-size: 1.6rem;
   }
-}
 
-/* 히스토리 슬라이더 스타일 */
-.history-slider-container {
-  background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-  border-radius: 12px;
-}
+  .history-controls {
+    padding: 12px;
+  }
 
-.cursor-pointer {
-  cursor: pointer;
-}
-
-.gap-2 {
-  gap: 8px;
-}
-
-.gap-4 {
-  gap: 16px;
+  .slider-header {
+    font-size: 0.85rem;
+  }
 }
 </style>
