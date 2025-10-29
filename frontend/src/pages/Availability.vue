@@ -176,7 +176,11 @@ if (currentHour >= 20) {
   targetDate.setDate(now.getDate() + 1); // 날짜를 하루 뒤로 설정
 }
 
-return targetDate.toISOString().slice(0, 10); // YYYY-MM-DD 형식으로 반환
+// 로컬 날짜를 YYYY-MM-DD 형식으로 변환 (UTC가 아닌 로컬 시간 기준)
+const year = targetDate.getFullYear();
+const month = String(targetDate.getMonth() + 1).padStart(2, '0');
+const day = String(targetDate.getDate()).padStart(2, '0');
+return `${year}-${month}-${day}`;
 }
 // --- 초기 날짜 계산 로직 끝 ---
 
