@@ -375,8 +375,15 @@ watch(date, (newD, oldD) => {
 if (newD !== oldD) fetchLatestCached();
 });
 
-// 컴포넌트 마운트 시 캐시된 데이터 로드
-onMounted(fetchLatestCached);
+// 컴포넌트 마운트 시 날짜 재확인 및 데이터 로드
+onMounted(() => {
+  // 페이지 로드 시마다 날짜를 다시 계산 (F5, 새로고침 대응)
+  const correctDate = getInitialDate();
+  if (date.value !== correctDate) {
+    date.value = correctDate;
+  }
+  fetchLatestCached();
+});
 
 // 시간 포맷 함수 (기존 유지)
 function formatTime(iso) {
