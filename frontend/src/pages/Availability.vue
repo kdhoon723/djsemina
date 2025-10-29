@@ -118,12 +118,17 @@
       </div>
     </transition>
 
-    <!-- 히스토리 다이얼로그 -->
-    <v-dialog v-model="historyDialog" max-width="800px">
+    <!-- 히스토리 슬라이더 다이얼로그 -->
+    <v-dialog v-model="historyDialog" max-width="900px" persistent>
       <v-card>
         <v-card-title class="d-flex justify-space-between align-center">
-          <span>{{ date }} 히스토리</span>
-          <v-btn icon="mdi-close" variant="text" @click="historyDialog = false"></v-btn>
+          <div>
+            <span>{{ date }} 히스토리</span>
+            <span v-if="currentSnapshot" class="ml-4 text-subtitle-1 text-grey">
+              {{ new Date(currentSnapshot.fetched_at).toLocaleString('ko-KR') }}
+            </span>
+          </div>
+          <v-btn icon="mdi-close" variant="text" @click="closeHistoryDialog"></v-btn>
         </v-card-title>
         <v-card-text>
           <div v-if="historyLoading" class="text-center py-8">
@@ -136,24 +141,77 @@
           <div v-else-if="historySnapshots.length === 0" class="text-center py-8 text-grey">
             이 날짜의 히스토리가 없습니다.
           </div>
-          <v-list v-else>
-            <v-list-item
-              v-for="snapshot in historySnapshots"
-              :key="snapshot.id"
-              @click="loadSnapshot(snapshot.id)"
-              class="cursor-pointer"
-            >
-              <template v-slot:prepend>
-                <v-icon>mdi-clock-outline</v-icon>
-              </template>
-              <v-list-item-title>
-                {{ formatTime(snapshot.fetched_at) }}
-              </v-list-item-title>
-              <v-list-item-subtitle>
-                조회 시간: {{ new Date(snapshot.fetched_at).toLocaleString('ko-KR') }}
-              </v-list-item-subtitle>
-            </v-list-item>
-          </v-list>
+          <div v-else>
+            <!-- 히스토리 슬라이더 -->
+            <div class="history-slider-container px-4 py-6">
+              <div class="d-flex align-center gap-4">
+                <v-icon size="large" color="primary">mdi-history</v-icon>
+                <v-slider
+                  v-model="historySliderIndex"
+                  :min="0"
+                  :max="historySnapshots.length - 1"
+                  :step="1"
+                  thumb-label="always"
+                  color="primary"
+                  track-color="grey-lighten-2"
+                  @update:model-value="onSliderChange"
+                  hide-details
+                  class="flex-grow-1"
+                >
+                  <template v-slot:thumb-label="{ modelValue }">
+                    <div class="text-caption">
+                      {{ formatTime(historySnapshots[modelValue].fetched_at) }}
+                    </div>
+                  </template>
+                </v-slider>
+                <div class="text-caption text-grey">
+                  {{ historySliderIndex + 1 }} / {{ historySnapshots.length }}
+                </div>
+              </div>
+
+              <!-- 재생 컨트롤 -->
+              <div class="d-flex justify-center gap-2 mt-4">
+                <v-btn
+                  @click="playHistory"
+                  :icon="isPlaying ? 'mdi-pause' : 'mdi-play'"
+                  variant="tonal"
+                  color="primary"
+                  size="small"
+                ></v-btn>
+                <v-btn
+                  @click="historySliderIndex = 0"
+                  icon="mdi-skip-backward"
+                  variant="text"
+                  size="small"
+                ></v-btn>
+                <v-btn
+                  @click="historySliderIndex = historySnapshots.length - 1"
+                  icon="mdi-skip-forward"
+                  variant="text"
+                  size="small"
+                ></v-btn>
+              </div>
+            </div>
+
+            <!-- 현재 스냅샷 정보 -->
+            <v-divider class="my-4"></v-divider>
+            <div v-if="currentSnapshot" class="px-4">
+              <div class="d-flex justify-space-between align-center mb-4">
+                <div>
+                  <div class="text-subtitle-2 text-grey">총 {{ currentSnapshot.rooms?.length || 0 }}개 방</div>
+                </div>
+                <v-btn
+                  @click="applyHistorySnapshot"
+                  color="primary"
+                  variant="elevated"
+                  prepend-icon="mdi-check"
+                  size="small"
+                >
+                  이 시점으로 보기
+                </v-btn>
+              </div>
+            </div>
+          </div>
         </v-card-text>
       </v-card>
     </v-dialog>
@@ -198,6 +256,10 @@ const historyDialog = ref(false);
 const historyLoading = ref(false);
 const historyError = ref("");
 const historySnapshots = ref([]);
+const historySliderIndex = ref(0);
+const currentSnapshot = ref(null);
+const isPlaying = ref(false);
+let playInterval = null;
 
 // --- Long Press 관련 상태 ---
 const longPressTimer = ref(null);
@@ -405,11 +467,17 @@ async function openHistoryDialog() {
   historyLoading.value = true;
   historyError.value = "";
   historySnapshots.value = [];
+  historySliderIndex.value = 0;
+  currentSnapshot.value = null;
 
   try {
     const res = await api.get(`/library-history?date=${date.value}`);
     if (res.data.success) {
       historySnapshots.value = res.data.snapshots;
+      if (historySnapshots.value.length > 0) {
+        historySliderIndex.value = historySnapshots.value.length - 1; // 최신부터 시작
+        await loadSnapshotByIndex(historySliderIndex.value);
+      }
     } else {
       historyError.value = res.data.error || "히스토리를 불러올 수 없습니다.";
     }
@@ -420,19 +488,69 @@ async function openHistoryDialog() {
   }
 }
 
-// 특정 스냅샷 로드
-async function loadSnapshot(snapshotId) {
+// 히스토리 다이얼로그 닫기
+function closeHistoryDialog() {
+  stopPlaying();
+  historyDialog.value = false;
+}
+
+// 슬라이더 인덱스로 스냅샷 로드
+async function loadSnapshotByIndex(index) {
+  if (index < 0 || index >= historySnapshots.value.length) return;
+
+  const snapshot = historySnapshots.value[index];
   try {
-    const res = await api.get(`/library-snapshot?id=${snapshotId}`);
+    const res = await api.get(`/library-snapshot?id=${snapshot.id}`);
     if (res.data.success) {
-      const snapshot = res.data.snapshot;
-      rooms.value = Array.isArray(snapshot.rooms) ? snapshot.rooms : [];
-      fetchedAt.value = snapshot.fetchedAt;
-      isCachedData.value = true;
-      historyDialog.value = false; // 다이얼로그 닫기
+      currentSnapshot.value = res.data.snapshot;
     }
   } catch (e) {
-    historyError.value = e.response?.data?.error || e.message || "스냅샷을 불러올 수 없습니다.";
+    console.error('스냅샷 로드 실패:', e);
+  }
+}
+
+// 슬라이더 변경 이벤트
+async function onSliderChange(newIndex) {
+  await loadSnapshotByIndex(newIndex);
+}
+
+// 현재 스냅샷을 메인 화면에 적용
+function applyHistorySnapshot() {
+  if (currentSnapshot.value) {
+    rooms.value = Array.isArray(currentSnapshot.value.rooms) ? currentSnapshot.value.rooms : [];
+    fetchedAt.value = currentSnapshot.value.fetchedAt;
+    isCachedData.value = true;
+    closeHistoryDialog();
+  }
+}
+
+// 히스토리 재생
+function playHistory() {
+  if (isPlaying.value) {
+    stopPlaying();
+  } else {
+    startPlaying();
+  }
+}
+
+// 재생 시작
+function startPlaying() {
+  isPlaying.value = true;
+  playInterval = setInterval(() => {
+    if (historySliderIndex.value < historySnapshots.value.length - 1) {
+      historySliderIndex.value++;
+    } else {
+      stopPlaying();
+    }
+  }, 1000); // 1초마다 다음 스냅샷
+}
+
+// 재생 중지
+function stopPlaying() {
+  isPlaying.value = false;
+  if (playInterval) {
+    clearInterval(playInterval);
+    playInterval = null;
   }
 }
 </script>
@@ -672,5 +790,23 @@ async function loadSnapshot(snapshotId) {
   .page-title {
     font-size: 1.6rem;
   }
+}
+
+/* 히스토리 슬라이더 스타일 */
+.history-slider-container {
+  background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+  border-radius: 12px;
+}
+
+.cursor-pointer {
+  cursor: pointer;
+}
+
+.gap-2 {
+  gap: 8px;
+}
+
+.gap-4 {
+  gap: 16px;
 }
 </style>
