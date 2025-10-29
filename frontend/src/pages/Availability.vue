@@ -40,6 +40,15 @@
             <v-tooltip v-if="isCachedData" activator="parent" location="top">자동 갱신된 정보</v-tooltip>
             <v-tooltip v-else activator="parent" location="top">수동으로 갱신된 정보</v-tooltip>
           </span>
+          <v-btn
+            @click="openHistoryDialog"
+            size="small"
+            variant="text"
+            prepend-icon="mdi-history"
+            color="grey-darken-1"
+          >
+            히스토리
+          </v-btn>
         </div>
       </div>
 
@@ -108,6 +117,46 @@
         </div>
       </div>
     </transition>
+
+    <!-- 히스토리 다이얼로그 -->
+    <v-dialog v-model="historyDialog" max-width="800px">
+      <v-card>
+        <v-card-title class="d-flex justify-space-between align-center">
+          <span>{{ date }} 히스토리</span>
+          <v-btn icon="mdi-close" variant="text" @click="historyDialog = false"></v-btn>
+        </v-card-title>
+        <v-card-text>
+          <div v-if="historyLoading" class="text-center py-8">
+            <v-progress-circular indeterminate color="primary"></v-progress-circular>
+            <p class="mt-4">히스토리를 불러오는 중...</p>
+          </div>
+          <div v-else-if="historyError" class="text-center py-8 text-error">
+            {{ historyError }}
+          </div>
+          <div v-else-if="historySnapshots.length === 0" class="text-center py-8 text-grey">
+            이 날짜의 히스토리가 없습니다.
+          </div>
+          <v-list v-else>
+            <v-list-item
+              v-for="snapshot in historySnapshots"
+              :key="snapshot.id"
+              @click="loadSnapshot(snapshot.id)"
+              class="cursor-pointer"
+            >
+              <template v-slot:prepend>
+                <v-icon>mdi-clock-outline</v-icon>
+              </template>
+              <v-list-item-title>
+                {{ formatTime(snapshot.fetched_at) }}
+              </v-list-item-title>
+              <v-list-item-subtitle>
+                조회 시간: {{ new Date(snapshot.fetched_at).toLocaleString('ko-KR') }}
+              </v-list-item-subtitle>
+            </v-list-item>
+          </v-list>
+        </v-card-text>
+      </v-card>
+    </v-dialog>
   </div>
 </template>
 
@@ -140,6 +189,12 @@ const fetchedAt = ref("");
 const isCachedData = ref(true); // 현재 표시된 데이터가 캐시된 데이터인지 여부
 const filter = ref("ALL");
 
+// 히스토리 관련 상태
+const historyDialog = ref(false);
+const historyLoading = ref(false);
+const historyError = ref("");
+const historySnapshots = ref([]);
+
 // --- Long Press 관련 상태 ---
 const longPressTimer = ref(null);
 const LONG_PRESS_DURATION = 5000; // 5초
@@ -165,56 +220,95 @@ return filter.value === "ALL"
 });
 
 /**
-* 최신 캐시된 데이터를 가져오는 함수 (기존 fetchCached 역할)
-* Supabase Edge Function은 항상 실시간 크롤링
+* 캐시를 먼저 표시하고 백그라운드에서 업데이트
+* Stale-While-Revalidate 패턴
 */
 async function fetchLatestCached() {
-loading.value = true; // 일반 로딩 시작
-forceCrawlLoading.value = false; // 강제 크롤링 로딩 해제
+loading.value = true;
+forceCrawlLoading.value = false;
 error.value = "";
+
 try {
-  // Supabase Edge Function POST 요청
-  const res = await api.post('/library-crawler', {
+  // 1단계: 캐시 조회 (즉시 표시)
+  const cacheRes = await api.post('/library-crawler', {
     userId: import.meta.env.VITE_USER_ID,
     userPw: import.meta.env.VITE_USER_PW,
-    date: date.value
+    date: date.value,
+    useCache: true
   });
-  rooms.value = Array.isArray(res.data.rooms) ? res.data.rooms : [];
-  fetchedAt.value = res.data.date || ""; // fetchedAt → date로 변경
-  isCachedData.value = false; // Supabase는 항상 실시간
+
+  if (cacheRes.data.success && cacheRes.data.cached) {
+    // 캐시된 데이터 즉시 표시
+    rooms.value = Array.isArray(cacheRes.data.rooms) ? cacheRes.data.rooms : [];
+    fetchedAt.value = cacheRes.data.fetchedAt || cacheRes.data.date;
+    isCachedData.value = true;
+    loading.value = false; // 캐시 표시 후 로딩 종료
+
+    // 2단계: 백그라운드에서 실시간 데이터 가져오기
+    try {
+      const realtimeRes = await api.post('/library-crawler', {
+        userId: import.meta.env.VITE_USER_ID,
+        userPw: import.meta.env.VITE_USER_PW,
+        date: date.value,
+        useCache: false
+      });
+
+      if (realtimeRes.data.success) {
+        // 새 데이터로 조용히 업데이트
+        rooms.value = Array.isArray(realtimeRes.data.rooms) ? realtimeRes.data.rooms : [];
+        fetchedAt.value = realtimeRes.data.fetchedAt;
+        isCachedData.value = false;
+      }
+    } catch (bgError) {
+      // 백그라운드 업데이트 실패는 무시 (캐시가 이미 표시됨)
+      console.warn('백그라운드 업데이트 실패:', bgError);
+    }
+  } else {
+    // 캐시 없음 - 실시간 크롤링
+    const res = await api.post('/library-crawler', {
+      userId: import.meta.env.VITE_USER_ID,
+      userPw: import.meta.env.VITE_USER_PW,
+      date: date.value,
+      useCache: false
+    });
+
+    rooms.value = Array.isArray(res.data.rooms) ? res.data.rooms : [];
+    fetchedAt.value = res.data.fetchedAt || res.data.date;
+    isCachedData.value = false;
+    loading.value = false;
+  }
 } catch (e) {
   error.value = e.response?.data?.error || e.message || "데이터를 불러오는 중 오류가 발생했습니다.";
-  rooms.value = []; // 오류 시 방 목록 초기화
+  rooms.value = [];
   fetchedAt.value = "";
-} finally {
-  loading.value = false; // 일반 로딩 종료
+  loading.value = false;
 }
 }
 
 /**
-* 실시간 크롤링을 강제로 요청하는 함수 (기존 fetchRealtime 역할)
-* Supabase Edge Function은 항상 실시간이므로 fetchLatestCached와 동일
+* 실시간 크롤링 강제 요청 (롱프레스 시)
 */
 async function forceRealtimeCrawl() {
-forceCrawlLoading.value = true; // 강제 크롤링 로딩 시작
-loading.value = false; // 일반 로딩 해제
+forceCrawlLoading.value = true;
+loading.value = false;
 error.value = "";
 try {
-  // Supabase Edge Function POST 요청 (항상 실시간)
+  // 캐시 무시하고 실시간 크롤링
   const res = await api.post('/library-crawler', {
     userId: import.meta.env.VITE_USER_ID,
     userPw: import.meta.env.VITE_USER_PW,
-    date: date.value
+    date: date.value,
+    useCache: false
   });
   rooms.value = Array.isArray(res.data.rooms) ? res.data.rooms : [];
-  fetchedAt.value = res.data.date || ""; // fetchedAt → date로 변경
-  isCachedData.value = false; // 강제로 가져왔으므로 캐시 아님
+  fetchedAt.value = res.data.fetchedAt || res.data.date;
+  isCachedData.value = false;
 } catch (e) {
   error.value = e.response?.data?.error || e.message || "실시간 데이터를 불러오는 중 오류가 발생했습니다.";
-  rooms.value = []; // 오류 시 방 목록 초기화
+  rooms.value = [];
   fetchedAt.value = "";
 } finally {
-  forceCrawlLoading.value = false; // 강제 크롤링 로딩 종료
+  forceCrawlLoading.value = false;
 }
 }
 
@@ -292,6 +386,43 @@ const hh = String(d.getHours()).padStart(2, "0");
 const mm = String(d.getMinutes()).padStart(2, "0");
 const ss = String(d.getSeconds()).padStart(2, "0");
 return `${hh}:${mm}:${ss}`;
+}
+
+// 히스토리 다이얼로그 열기
+async function openHistoryDialog() {
+  historyDialog.value = true;
+  historyLoading.value = true;
+  historyError.value = "";
+  historySnapshots.value = [];
+
+  try {
+    const res = await api.get(`/library-history?date=${date.value}`);
+    if (res.data.success) {
+      historySnapshots.value = res.data.snapshots;
+    } else {
+      historyError.value = res.data.error || "히스토리를 불러올 수 없습니다.";
+    }
+  } catch (e) {
+    historyError.value = e.response?.data?.error || e.message || "히스토리 조회 중 오류가 발생했습니다.";
+  } finally {
+    historyLoading.value = false;
+  }
+}
+
+// 특정 스냅샷 로드
+async function loadSnapshot(snapshotId) {
+  try {
+    const res = await api.get(`/library-snapshot?id=${snapshotId}`);
+    if (res.data.success) {
+      const snapshot = res.data.snapshot;
+      rooms.value = Array.isArray(snapshot.rooms) ? snapshot.rooms : [];
+      fetchedAt.value = snapshot.fetchedAt;
+      isCachedData.value = true;
+      historyDialog.value = false; // 다이얼로그 닫기
+    }
+  } catch (e) {
+    historyError.value = e.response?.data?.error || e.message || "스냅샷을 불러올 수 없습니다.";
+  }
 }
 </script>
 
