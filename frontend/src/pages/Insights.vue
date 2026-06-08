@@ -94,10 +94,10 @@
       <!-- ===== 시간·추세 ===== -->
       <div v-show="tab === 'trend'">
         <section class="card">
-          <h2 class="card-title">날짜별 이용률 추세 <small>(빨강 = 시험 추정기간)</small></h2>
+          <h2 class="card-title">날짜별 이용률 추세 <small>(빨강 = 평소보다 붐빈 구간 · 평균 +1σ↑)</small></h2>
           <svg class="trend" viewBox="0 0 1000 220" preserveAspectRatio="none">
             <line v-for="g in [0, 25, 50, 75, 100]" :key="g" class="grid" x1="0" x2="1000" :y1="200 - g * 2" :y2="200 - g * 2" />
-            <rect v-for="(ex, i) in examBands" :key="'ex' + i" :x="ex.x" y="0" :width="ex.w" height="200" class="exam-band" />
+            <rect v-for="(ex, i) in surgeBands" :key="'ex' + i" :x="ex.x" y="0" :width="ex.w" height="200" class="surge-band" />
             <polygon :points="trendArea" class="trend-area" />
             <polyline :points="trendLine" class="trend-line" />
           </svg>
@@ -432,7 +432,7 @@ const roomZeroDays = computed(() => {
   return out.sort((a, b) => b.rate - a.rate);
 });
 
-// 추세 + 시험기간 탐지
+// 추세 + 이용 급증 구간 탐지
 const trend = computed(() => {
   const m = new Map();
   for (const r of filtered.value) { if (!m.has(r[0])) m.set(r[0], { b: 0, k: 0 }); const o = m.get(r[0]); o.b += popcount(r[4]); o.k += popcount(r[3]); }
@@ -445,8 +445,8 @@ const trendTicks = computed(() => {
   t.forEach((p, i) => { const ym = p.date.slice(0, 7); if (!seen.has(ym)) { seen.add(ym); out.push({ x: (i / Math.max(t.length - 1, 1) * 100).toFixed(1), label: p.date.slice(5, 7) + "월" }); } });
   return out;
 });
-// 평일 z-score >1.2 = 시험 추정
-const examBands = computed(() => {
+// 평일 이용률 z-score >1.2 = 평소보다 붐빈 구간
+const surgeBands = computed(() => {
   const t = trend.value; if (t.length < 5) return [];
   const wk = t.filter((p) => { const w = dowOf(p.date); return w >= 1 && w <= 5 && p.rate > 0.02; });
   if (wk.length < 5) return [];
@@ -596,7 +596,7 @@ const beh = computed(() => {
 .trend .grid { stroke: #eef2f7; stroke-width: 1; }
 .trend-line { fill: none; stroke: var(--primary); stroke-width: 2; vector-effect: non-scaling-stroke; }
 .trend-area { fill: rgba(59,130,246,0.12); }
-.exam-band { fill: rgba(239,68,68,0.13); }
+.surge-band { fill: rgba(239,68,68,0.13); }
 .trend-axis { position: relative; height: 18px; margin-top: 2px; }
 .trend-tick { position: absolute; transform: translateX(-50%); font-size: 0.62rem; color: var(--text-light); }
 
