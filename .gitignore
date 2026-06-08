@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Build output
+dist/
+build/
+.firebase/
+*.local
+
+# Archives / backups
+*.zip
+
+# Logs
+*.log
+npm-debug.log*
+
+# Tooling / agent state
+.omc/
+
+# Editor / OS
+.DS_Store
+.vscode/*
+!.vscode/extensions.json
+.idea/
