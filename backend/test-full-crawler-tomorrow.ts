@@ -207,8 +207,8 @@ class LibraryAPIClient {
 }
 
 // 테스트 실행
-const userId = Deno.env.get('USER_ID') || '***REMOVED***';
-const userPw = Deno.env.get('USER_PW') || '***REMOVED***';
+const userId = Deno.env.get('USER_ID');
+const userPw = Deno.env.get('USER_PW');
 
 const tomorrow = new Date();
 tomorrow.setDate(tomorrow.getDate() + 1);

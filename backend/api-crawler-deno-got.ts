@@ -306,8 +306,8 @@ export async function handler(req: Request): Promise<Response> {
 if (import.meta.main) {
   console.log('🚀 Deno 로컬 테스트 (npm:got 사용)\n');
 
-  const userId = Deno.env.get('USER_ID') || '***REMOVED***';
-  const userPw = Deno.env.get('USER_PW') || '***REMOVED***';
+  const userId = Deno.env.get('USER_ID');
+  const userPw = Deno.env.get('USER_PW');
   const dateStr = Deno.args[0] || new Date().toISOString().slice(0, 10);
 
   const client = new LibraryAPIClient();

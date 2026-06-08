@@ -6,8 +6,8 @@ import got from 'npm:got@14';
 import { CookieJar } from 'npm:tough-cookie@5';
 
 const BASE_URL = 'https://library.daejin.ac.kr';
-const userId = Deno.env.get('USER_ID') || '***REMOVED***';
-const userPw = Deno.env.get('USER_PW') || '***REMOVED***';
+const userId = Deno.env.get('USER_ID');
+const userPw = Deno.env.get('USER_PW');
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 

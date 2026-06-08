@@ -327,8 +327,6 @@ async function fetchLatestCached() {
   // 2단계: 백그라운드로 서버 캐시 확인
   try {
     const cacheRes = await api.post('/library-crawler', {
-      userId: import.meta.env.VITE_USER_ID,
-      userPw: import.meta.env.VITE_USER_PW,
       date: date.value,
       useCache: true
     });
@@ -357,8 +355,6 @@ async function fetchLatestCached() {
       // 3단계: 백그라운드로 실시간 데이터 가져오기
       try {
         const realtimeRes = await api.post('/library-crawler', {
-          userId: import.meta.env.VITE_USER_ID,
-          userPw: import.meta.env.VITE_USER_PW,
           date: date.value,
           useCache: false
         });
@@ -385,8 +381,6 @@ async function fetchLatestCached() {
     } else {
       // 캐시가 없으면 실시간 크롤링
       const res = await api.post('/library-crawler', {
-        userId: import.meta.env.VITE_USER_ID,
-        userPw: import.meta.env.VITE_USER_PW,
         date: date.value,
         useCache: false
       });
@@ -424,8 +418,6 @@ async function forceRealtimeCrawl() {
 
   try {
     const res = await api.post('/library-crawler', {
-      userId: import.meta.env.VITE_USER_ID,
-      userPw: import.meta.env.VITE_USER_PW,
       date: date.value,
       useCache: false
     });

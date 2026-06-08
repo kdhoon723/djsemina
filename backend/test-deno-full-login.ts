@@ -6,8 +6,8 @@ import got from 'got';
 import { CookieJar } from 'tough-cookie';
 
 const BASE_URL = 'https://library.daejin.ac.kr';
-const userId = Deno.env.get('USER_ID') || '***REMOVED***';
-const userPw = Deno.env.get('USER_PW') || '***REMOVED***';
+const userId = Deno.env.get('USER_ID');
+const userPw = Deno.env.get('USER_PW');
 
 console.log('=== Deno npm:got 전체 로그인 테스트 ===\n');
 

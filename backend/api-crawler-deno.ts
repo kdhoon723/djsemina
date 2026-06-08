@@ -364,8 +364,8 @@ if (import.meta.main) {
   console.log('🚀 Deno 로컬 테스트 시작...\n');
 
   // 환경 변수 로드 (또는 직접 입력)
-  const userId = Deno.env.get('USER_ID') || '***REMOVED***';
-  const userPw = Deno.env.get('USER_PW') || '***REMOVED***';
+  const userId = Deno.env.get('USER_ID');
+  const userPw = Deno.env.get('USER_PW');
   const dateStr = Deno.args[0] || new Date().toISOString().slice(0, 10);
 
   const client = new LibraryAPIClientDeno();
