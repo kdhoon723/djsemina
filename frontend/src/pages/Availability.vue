@@ -93,7 +93,6 @@
                 thumb-label="always"
                 color="primary"
                 track-color="grey-lighten-2"
-                @update:model-value="onSliderChange"
                 hide-details
                 class="history-slider"
               >
@@ -536,11 +535,6 @@ function exitHistoryMode() {
   fetchLatestCached();
 }
 
-// 슬라이더 변경 - 즉시 반응 (API 호출 없음)
-function onSliderChange(newIndex) {
-  applySnapshotToView(newIndex);
-}
-
 // 스냅샷을 화면에 적용
 function applySnapshotToView(index) {
   if (index >= 0 && index < allSnapshotsData.value.length) {
@@ -585,6 +579,13 @@ function stopPlaying() {
 watch(date, (newD, oldD) => {
   if (newD !== oldD && !isHistoryMode.value) {
     fetchLatestCached();
+  }
+});
+
+// 슬라이더 인덱스 변경 감지 - 드래그/재생/스킵 모든 경우에 데이터를 함께 갱신
+watch(historySliderIndex, (idx) => {
+  if (isHistoryMode.value) {
+    applySnapshotToView(idx);
   }
 });
 

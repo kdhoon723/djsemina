@@ -6,9 +6,13 @@
   <div class="app-wrapper">
     <nav class="navbar">
       <div class="navbar-content">
-        <div class="navbar-brand">
+        <RouterLink to="/" class="navbar-brand">
           <img src="https://www.daejin.ac.kr/sites/daejin/images/common/logo.png" alt="대진대학교" class="logo" />
           <span class="brand-text">DJSemina</span>
+        </RouterLink>
+        <div class="navbar-links">
+          <RouterLink to="/" class="nav-link">예약현황</RouterLink>
+          <RouterLink to="/insights" class="nav-link">인사이트</RouterLink>
         </div>
       </div>
     </nav>
@@ -76,12 +80,38 @@ body {
   padding: 12px 20px;
   display: flex;
   align-items: center;
+  justify-content: space-between;
 }
 
 .navbar-brand {
   display: flex;
   align-items: center;
   gap: 12px;
+  color: #fff;
+  text-decoration: none;
+}
+
+.navbar-brand:hover { color: #fff; }
+
+.navbar-links {
+  display: flex;
+  gap: 6px;
+}
+
+.nav-link {
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 0.92rem;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: 999px;
+  transition: all 0.2s;
+}
+
+.nav-link:hover { color: #fff; background: rgba(255, 255, 255, 0.12); }
+
+.nav-link.router-link-exact-active {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.2);
 }
 
 .logo {
