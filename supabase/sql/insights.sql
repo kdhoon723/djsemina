@@ -102,3 +102,17 @@ grant execute on function public.get_booking_facts_json() to anon, authenticated
 
 -- 최초 백필(월 단위로 쪼개 실행):
 -- select public.get_room_booking_facts_range('2025-10-01','2025-10-31'); ... 등으로 insert
+
+-- ============================================================================
+-- 예약행동 통계 (5분 간격 스냅샷 차분 기반) — needs-raw-compute
+-- 인접 스냅샷에서 한 방에 동시에 사라진(예약된) 슬롯 묶음 = 1회 예약(burst).
+-- 시스템 1인 1일 3시간(6슬롯) 제한이 데이터에 보임(≤6슬롯 98%).
+-- 무거우므로 캐시 테이블에 저장, 프론트는 작은 JSON 1건만 읽음.
+-- ============================================================================
+-- create table library_behavior_stats(id int pk=1, computed_at, window_days, payload jsonb) + RLS read
+-- refresh_behavior_stats(p_days): 임시테이블 _ev(예약된 슬롯)→_burst(date,room,gone_at 묶음)
+--   집계: burst 분포 / 예약발생시각(gone_at KST 시간별) / 리드타임(first_slot-gone_at) / 구분별
+-- get_behavior_stats_json(): 캐시 1행 반환 (anon)
+-- cron: 'refresh-behavior-stats' 매일 05:30 UTC refresh_behavior_stats(45)
+-- 백필은 21일 등 작은 window로 (45일 한 번에 하면 Management API 타임아웃; cron은 무제한이라 45일 OK)
+-- 전체 정의는 배포본(get_room_booking_facts_range 패턴과 동일한 obs/perslot/gone CTE) 참조.
