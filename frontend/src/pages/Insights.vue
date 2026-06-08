@@ -580,7 +580,7 @@ const beh = computed(() => {
 .bar.over { background: #f59e0b; }
 .bar-label { font-size: 0.76rem; color: var(--text-light); font-weight: 600; }
 .bar-label.weekend { color: var(--accent); }
-.bar-label.slot { font-size: 0.58rem; white-space: nowrap; }
+.bar-label.slot { font-size: 0.58rem; white-space: nowrap; height: 0.9rem; line-height: 0.9rem; flex-shrink: 0; }
 .bar-label.tiny { font-size: 0.6rem; }
 
 .heatmap-scroll { overflow-x: auto; }
