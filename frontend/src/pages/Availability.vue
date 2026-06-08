@@ -489,7 +489,7 @@ async function enterHistoryMode() {
   historySliderIndex.value = 0;
 
   try {
-    // 1단계: 스냅샷 목록 가져오기
+    // 한 번의 요청으로 해당 날짜의 모든 스냅샷(rooms 포함)을 가져온다 (N+1 제거)
     const listRes = await api.get(`/library-history?date=${date.value}`);
 
     if (!listRes.data.success) {
@@ -497,7 +497,7 @@ async function enterHistoryMode() {
       return;
     }
 
-    const snapshots = listRes.data.snapshots;
+    const snapshots = Array.isArray(listRes.data.snapshots) ? listRes.data.snapshots : [];
 
     if (snapshots.length === 0) {
       historyError.value = "";
@@ -506,28 +506,13 @@ async function enterHistoryMode() {
       return;
     }
 
-    // 2단계: 모든 스냅샷 데이터를 병렬로 로드
-    const snapshotPromises = snapshots.map(snapshot =>
-      api.get(`/library-snapshot?id=${snapshot.id}`)
-        .then(res => {
-          if (res.data.success) {
-            return res.data.snapshot;
-          }
-          return null;
-        })
-        .catch(err => {
-          console.error(`스냅샷 ${snapshot.id} 로드 실패:`, err);
-          return null;
-        })
-    );
-
-    const loadedSnapshots = await Promise.all(snapshotPromises);
-
-    // null이 아닌 것만 필터링
-    allSnapshotsData.value = loadedSnapshots.filter(s => s !== null);
+    // 시간 오름차순 정렬(과거→현재): 슬라이더 왼쪽=과거, 오른쪽=현재
+    allSnapshotsData.value = snapshots
+      .slice()
+      .sort((a, b) => new Date(a.fetched_at) - new Date(b.fetched_at));
 
     if (allSnapshotsData.value.length > 0) {
-      historySliderIndex.value = allSnapshotsData.value.length - 1; // 최신부터 시작
+      historySliderIndex.value = allSnapshotsData.value.length - 1; // 가장 오른쪽 = 현재(최신)에서 시작
       applySnapshotToView(historySliderIndex.value);
     }
 
