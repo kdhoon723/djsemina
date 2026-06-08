@@ -146,7 +146,9 @@
           <div class="sig-list">
             <div v-for="r in roomSignature" :key="r.title" class="sig-row">
               <span class="sig-name">{{ r.title }}</span>
-              <span class="sig-peak" :style="{ left: sigPos(r.peakIdx) }">{{ r.peak }}</span>
+              <div class="sig-track">
+                <span class="sig-peak" :style="{ left: sigPos(r.peakIdx) }">{{ r.peak }}</span>
+              </div>
             </div>
             <div class="sig-axis"><span v-for="h in [9, 12, 15, 18, 20]" :key="h" :style="{ left: sigPosByHour(h) }">{{ h }}시</span></div>
           </div>
@@ -611,8 +613,9 @@ const beh = computed(() => {
 
 .sig-list { position: relative; }
 .sig-row { display: grid; grid-template-columns: 6rem 1fr; align-items: center; height: 22px; }
-.sig-name { font-size: 0.74rem; font-weight: 600; }
-.sig-peak { position: relative; display: inline-block; transform: translateX(-50%); background: var(--primary); color: #fff; font-size: 0.6rem; padding: 1px 5px; border-radius: 999px; white-space: nowrap; }
+.sig-name { font-size: 0.74rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 6px; }
+.sig-track { position: relative; height: 100%; }
+.sig-peak { position: absolute; top: 50%; transform: translate(-50%, -50%); background: var(--primary); color: #fff; font-size: 0.6rem; padding: 1px 5px; border-radius: 999px; white-space: nowrap; }
 .sig-axis { position: relative; height: 16px; margin-left: 6rem; margin-top: 4px; border-top: 1px dashed #e2e8f0; }
 .sig-axis span { position: absolute; transform: translateX(-50%); font-size: 0.6rem; color: var(--text-light); top: 2px; }
 
