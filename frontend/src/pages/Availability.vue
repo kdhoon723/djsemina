@@ -182,20 +182,10 @@
             <span class="total-count">(전체 {{ roomList.length }}개)</span>
           </div>
 
-          <div class="legend">
-            <div class="legend-item">
-              <span class="legend-color available"></span>
-              <span>예약 가능</span>
-            </div>
-            <div class="legend-item">
-              <span class="legend-color unavailable"></span>
-              <span>예약 불가</span>
-            </div>
-          </div>
         </div>
 
         <div class="table-wrapper">
-          <SlotTable :rooms="filteredRooms" />
+          <SlotTable :rooms="filteredRooms" :date="date" />
         </div>
       </div>
     </transition>
