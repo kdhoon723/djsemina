@@ -106,13 +106,89 @@ grant execute on function public.get_booking_facts_json() to anon, authenticated
 -- ============================================================================
 -- 예약행동 통계 (5분 간격 스냅샷 차분 기반) — needs-raw-compute
 -- 인접 스냅샷에서 한 방에 동시에 사라진(예약된) 슬롯 묶음 = 1회 예약(burst).
+-- gone_at = last_avail 직후 첫 크롤 시각(slot_dt 이전이어야 진짜 예약).
 -- 시스템 1인 1일 3시간(6슬롯) 제한이 데이터에 보임(≤6슬롯 98%).
--- 무거우므로 캐시 테이블에 저장, 프론트는 작은 JSON 1건만 읽음.
+-- 무거우므로 캐시 테이블에 단일행 jsonb로 저장, 프론트는 작은 JSON 1건만 읽음.
 -- ============================================================================
--- create table library_behavior_stats(id int pk=1, computed_at, window_days, payload jsonb) + RLS read
--- refresh_behavior_stats(p_days): 임시테이블 _ev(예약된 슬롯)→_burst(date,room,gone_at 묶음)
---   집계: burst 분포 / 예약발생시각(gone_at KST 시간별) / 리드타임(first_slot-gone_at) / 구분별
--- get_behavior_stats_json(): 캐시 1행 반환 (anon)
--- cron: 'refresh-behavior-stats' 매일 05:30 UTC refresh_behavior_stats(45)
--- 백필은 21일 등 작은 window로 (45일 한 번에 하면 Management API 타임아웃; cron은 무제한이라 45일 OK)
--- 전체 정의는 배포본(get_room_booking_facts_range 패턴과 동일한 obs/perslot/gone CTE) 참조.
+
+-- 캐시 테이블 (단일행, id=1 고정)
+create table if not exists public.library_behavior_stats (
+  id int primary key default 1,
+  computed_at timestamptz, window_days int, payload jsonb,
+  constraint one_row check (id = 1)
+);
+alter table public.library_behavior_stats enable row level security;
+drop policy if exists "public read behavior" on public.library_behavior_stats;
+create policy "public read behavior" on public.library_behavior_stats for select to anon, authenticated using (true);
+grant select on public.library_behavior_stats to anon, authenticated;
+
+-- 갱신: 최근 p_days 스냅샷 차분 → burst/예약시각/리드타임/구분별 집계 → 단일행 upsert
+create or replace function public.refresh_behavior_stats(p_days integer default 45)
+returns integer language plpgsql security definer set search_path = public as $function$
+declare pl jsonb; n int;
+begin
+  create temp table _ev on commit drop as
+  with src as (select date, fetched_at, rooms from seminar_room_snapshots
+               where date >= current_date - least(greatest(coalesce(p_days,45),1),120)),
+  obs as (
+    select s.date, s.fetched_at, r->>'cate_cd' cate, r->>'title' room, t->>'start' st,
+      ((s.date + (t->>'start')::time) at time zone 'Asia/Seoul') slot_dt
+    from src s cross join lateral jsonb_array_elements(s.rooms) r
+     cross join lateral jsonb_array_elements(coalesce(r->'times','[]'::jsonb)) t
+    where (t->>'start') ~ '^[0-9]{1,2}:[0-9]{2}$'),
+  perslot as (select date, cate, room, st, min(slot_dt) slot_dt, max(fetched_at) last_avail
+    from obs where fetched_at < slot_dt group by date, cate, room, st),
+  gone as (select p.date,p.cate,p.room,p.slot_dt,
+      (select min(x.fetched_at) from src x where x.date=p.date and x.fetched_at>p.last_avail) gone_at
+    from perslot p)
+  select date,cate,room,slot_dt,gone_at from gone where gone_at is not null and gone_at < slot_dt;
+
+  -- 동시에 사라진 슬롯 묶음 = 1회 예약(burst)
+  create temp table _burst on commit drop as
+  select date, cate, room, gone_at, count(*) sz, min(slot_dt) first_slot
+  from _ev group by date, cate, room, gone_at;
+
+  pl := jsonb_build_object(
+    'burst', (select coalesce(jsonb_agg(jsonb_build_array(k,c) order by k),'[]') from
+      (select least(sz,7) k, count(*) c from _burst group by least(sz,7)) q),
+    'bookingByHour', (select coalesce(jsonb_agg(jsonb_build_array(h,c) order by h),'[]') from
+      (select extract(hour from gone_at at time zone 'Asia/Seoul')::int h, count(*) c from _burst group by 1) q),
+    'leadtime', (select coalesce(jsonb_agg(jsonb_build_array(label,c) order by ord),'[]') from
+      (select case bk when 0 then '0-1h' when 1 then '1-3h' when 2 then '3-6h' when 3 then '6-12h'
+                       when 4 then '12-24h' when 5 then '1-2일' else '2일+' end label, bk ord, count(*) c
+       from (select width_bucket(extract(epoch from (first_slot-gone_at))/3600, array[1,3,6,12,24,48]) bk from _burst) y
+       group by bk) q),
+    'byCate', (select coalesce(jsonb_object_agg(cate, a),'{}') from
+      (select cate, jsonb_build_object('bookings',count(*),'avgSlots',round(avg(sz),2)) a from _burst group by cate) q),
+    'avgSlots', (select round(avg(sz),2) from _burst),
+    'capCompliancePct', (select round(100.0*count(*) filter (where sz<=6)/nullif(count(*),0),1) from _burst),
+    'totalBookings', (select count(*) from _burst)
+  );
+  insert into public.library_behavior_stats(id,computed_at,window_days,payload)
+  values (1, now(), p_days, pl)
+  on conflict (id) do update set computed_at=excluded.computed_at, window_days=excluded.window_days, payload=excluded.payload;
+  get diagnostics n = row_count; return (select count(*) from _burst);
+end $function$;
+
+-- 프론트가 읽는 단일행 JSON (anon)
+create or replace function public.get_behavior_stats_json()
+returns jsonb language sql stable security definer set search_path = public as $function$
+  select jsonb_build_object('computed_at',computed_at,'window_days',window_days,'payload',payload)
+  from public.library_behavior_stats where id=1;
+$function$;
+grant execute on function public.refresh_behavior_stats(integer) to anon, authenticated;
+grant execute on function public.get_behavior_stats_json() to anon, authenticated;
+
+-- 자동 갱신: 매일 05:30 UTC (cron 컨텍스트는 statement timeout 없어 45일 OK)
+-- select cron.schedule('refresh-behavior-stats','30 5 * * *', $$select public.refresh_behavior_stats(45)$$);
+-- ⚠️ 최초 백필은 Management API 타임아웃(90s) 때문에 21일 등 작은 window로:
+--    select public.refresh_behavior_stats(21);
+
+-- ============================================================================
+-- 배포 현황 (Supabase 프로젝트 YOUR_PROJECT_REF, DJBus와 공유)
+--   테이블: library_booking_facts(약 4.4k행), library_behavior_stats(단일행)
+--   함수: get_room_booking_facts_range/get_room_booking_facts/refresh_library_booking_facts/
+--         get_booking_facts_json/refresh_behavior_stats/get_behavior_stats_json
+--   cron: #17 refresh-library-facts (0 */6 * * *), #18 refresh-behavior-stats (30 5 * * *)
+--   ※ 크롤러(seminar_room_snapshots 적재)는 DJBus 기존 cron #7 library-auto-crawler(*/15)
+-- ============================================================================
