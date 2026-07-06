@@ -18,5 +18,7 @@
     "puppeteer": "^24.6.1",
     "puppeteer-cluster": "^0.24.0",
     "tough-cookie": "^6.0.0"
-  }
+  },
+  "description": "대진대학교 세미나실 예약 현황 크롤러/API 참고 구현",
+  "license": "MIT"
 }

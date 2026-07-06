@@ -28,3 +28,10 @@ supabase/.temp/
 .vscode/*
 !.vscode/extensions.json
 .idea/
+# Local agent/runtime state
+.claude/
+.mcp.json
+# Deployment local state
+.firebaserc
+**/.firebaserc
+**/.firebase/

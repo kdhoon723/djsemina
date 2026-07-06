@@ -23,5 +23,7 @@
     "postcss": "^8.5.3",
     "tailwindcss": "^4.1.4",
     "vite": "^6.3.1"
-  }
+  },
+  "description": "대진대학교 세미나실 예약 현황 프론트엔드",
+  "license": "MIT"
 }
