@@ -1,7 +1,4 @@
-/**
- * Supabase Edge Function: library-crawler
- * npm:got + npm:tough-cookie + Database Cache
- */ import { createClient } from 'jsr:@supabase/supabase-js@2';
+import { createClient } from 'jsr:@supabase/supabase-js@2';
 import { LibraryAPIClient } from '../_shared/library-client.ts';
 /* ─── Supabase Edge Function 핸들러 ─── */ Deno.serve(async (req)=>{
   const corsHeaders = {

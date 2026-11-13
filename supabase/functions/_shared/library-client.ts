@@ -1,8 +1,8 @@
 import got from 'npm:got@14';
 import { CookieJar } from 'npm:tough-cookie@5';
-/* ─── 설정 ─── */ const TERM_MIN = 30;
+const TERM_MIN = 30;
 const BASE_URL = 'https://library.daejin.ac.kr';
-/* ─── 유틸 함수 ─── */ const sleep = (ms)=>new Promise((r)=>setTimeout(r, ms));
+const sleep = (ms)=>new Promise((r)=>setTimeout(r, ms));
 const plus30 = (t)=>{
   const [h, m] = t.split(':').map(Number);
   const d = new Date();
