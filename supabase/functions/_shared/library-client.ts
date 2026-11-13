@@ -74,78 +74,56 @@ export class LibraryAPIClient {
       return false;
     }
   }
-  async getSeminarList() {
-    console.log('[세미나실 목록] 조회');
-    try {
-      const response = await this.client.get('seminar_seminar_list.mir');
-      const html = response.body;
-      const rooms = [];
-      for (const card of html.matchAll(/<div class="studyroom_card"([^>]*)>/g)){
-        const attr = (name: string)=>card[1].match(new RegExp(`data-${name}="([^"]*)"`))?.[1];
-        rooms.push({
-          sloc_code: attr('sloc-code'),
-          cate_cd: attr('group-code'),
-          room_cd: attr('seminar-code'),
-          title: attr('seminar-name')
-        });
-      }
-      console.log(`[세미나실 목록] ${rooms.length}개 발견`);
-      return rooms;
-    } catch (error) {
-      console.error('[세미나실 목록] 오류:', error.message);
-      return [];
-    }
-  }
-  async getAvailableTimes(room, dateStr) {
+  async crawl(dateStr) {
+    console.log(`[크롤링] 시작: ${dateStr}`);
+    const startTime = Date.now();
     try {
       const [year, month, day] = dateStr.split('-');
-      const params = new URLSearchParams();
-      params.append('sloc_code', room.sloc_code);
-      params.append('group_code', room.cate_cd);
-      params.append('seminar_code', room.room_cd);
-      params.append('resv_datev', dateStr);
-      params.append('seminar_name', room.title);
-      params.append('year', year);
-      params.append('month', month);
-      params.append('day', day);
-      const response = await this.client.post('seminar_resv.mir', {
+      const nowTime = new Date().toLocaleTimeString('en-GB', {
+        timeZone: 'Asia/Seoul',
+        hour12: false
+      });
+      const params = new URLSearchParams({
+        sloc_code: 'DJUL',
+        year,
+        month,
+        day,
+        resv_use_start_datev: dateStr,
+        resv_use_end_timev: nowTime,
+        holiday_datev: dateStr,
+        all_search_yn: 'Y',
+        closed_datev: dateStr,
+        resv_try_datev: dateStr
+      });
+      const response = await this.client.post('seminar_seminar_list_inc.mir', {
         body: params.toString(),
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded'
         }
       });
-      const timeMatches = response.body.matchAll(/<option id="startTime_\d+">(\d{1,2}:\d{2})<\/option>/g);
-      let starts = Array.from(timeMatches).map((m)=>m[1]);
-      const TODAY = new Date().toISOString().slice(0, 10);
-      if (dateStr === TODAY) {
-        starts = starts.filter((t)=>!pastToday(t));
+      const html = response.body;
+      const resvDate = html.match(/data-resv-date="([^"]*)"/)?.[1];
+      if (resvDate !== dateStr) {
+        console.error(`[크롤링] 요청 날짜 ${dateStr}와 응답 날짜 ${resvDate} 불일치`);
+        return [];
       }
-      const times = starts.map((s)=>({
-          start: s,
-          end: plus30(s)
-        }));
-      return {
-        ...room,
-        times
-      };
-    } catch (error) {
-      console.error(`[시간 조회] ${room.title} 오류:`, error.message);
-      return {
-        ...room,
-        times: []
-      };
-    }
-  }
-  async crawl(dateStr) {
-    console.log(`[크롤링] 시작: ${dateStr}`);
-    const startTime = Date.now();
-    try {
-      const rooms = await this.getSeminarList();
-      if (rooms.length === 0) return [];
-      console.log(`[크롤링] ${rooms.length}개 방 병렬 조회`);
-      const results = await Promise.all(rooms.map((room)=>this.getAvailableTimes(room, dateStr)));
+      const isToday = dateStr === new Date().toISOString().slice(0, 10);
+      const results = html.split('<div class="studyroom_card"').slice(1).map((card)=>{
+        const attr = (name: string)=>card.match(new RegExp(`data-${name}="([^"]*)"`))?.[1];
+        const starts = [...card.matchAll(/data-start-time="([^"]+)"\s+data-status="AVAILABLE"/g)].map((m)=>m[1]).filter((t)=>!isToday || !pastToday(t));
+        return {
+          sloc_code: attr('sloc-code'),
+          cate_cd: attr('group-code'),
+          room_cd: attr('seminar-code'),
+          title: attr('seminar-name'),
+          times: starts.map((s)=>({
+              start: s,
+              end: plus30(s)
+            }))
+        };
+      });
       const duration = ((Date.now() - startTime) / 1000).toFixed(1);
-      console.log(`[크롤링] 완료 (${duration}초)`);
+      console.log(`[크롤링] ${results.length}개 방 완료 (${duration}초)`);
       return results;
     } catch (error) {
       console.error('[크롤링] 오류:', error.message);
