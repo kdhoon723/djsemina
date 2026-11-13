@@ -69,6 +69,18 @@ import { LibraryAPIClient } from '../_shared/library-client.ts';
     // 내일 데이터 크롤링 (같은 세션 사용)
     console.log(`[Auto-Crawler] 내일 데이터 크롤링: ${tomorrowStr}`);
     const tomorrowResults = await client.crawl(tomorrowStr);
+    if (todayResults.length === 0 && tomorrowResults.length === 0) {
+      return new Response(JSON.stringify({
+        success: false,
+        error: '세미나실 목록 파싱 결과 0개 (사이트 구조 변경 의심)'
+      }), {
+        status: 502,
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'application/json'
+        }
+      });
+    }
     // 오늘 데이터 저장
     let todaySaved = false;
     if (todayResults.length > 0) {

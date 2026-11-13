@@ -76,6 +76,18 @@ import { LibraryAPIClient } from '../_shared/library-client.ts';
       });
     }
     const results = await client.crawl(dateStr);
+    if (results.length === 0) {
+      return new Response(JSON.stringify({
+        success: false,
+        error: '세미나실 목록 파싱 결과 0개 (사이트 구조 변경 의심)'
+      }), {
+        status: 502,
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'application/json'
+        }
+      });
+    }
     const fetchedAt = new Date().toISOString();
     // DB에 저장
     console.log('[DB] 스냅샷 저장 시작');

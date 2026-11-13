@@ -80,13 +80,13 @@ export class LibraryAPIClient {
       const response = await this.client.get('seminar_seminar_list.mir');
       const html = response.body;
       const rooms = [];
-      const scriptMatches = html.matchAll(/seminar_resv\('\/seminar_resv\.mir',\s*'([^']+)',\s*'([^']+)',\s*'([^']+)',\s*'([^']+)'/g);
-      for (const match of scriptMatches){
+      for (const card of html.matchAll(/<div class="studyroom_card"([^>]*)>/g)){
+        const attr = (name: string)=>card[1].match(new RegExp(`data-${name}="([^"]*)"`))?.[1];
         rooms.push({
-          sloc_code: match[1],
-          cate_cd: match[2],
-          room_cd: match[3],
-          title: match[4]
+          sloc_code: attr('sloc-code'),
+          cate_cd: attr('group-code'),
+          room_cd: attr('seminar-code'),
+          title: attr('seminar-name')
         });
       }
       console.log(`[세미나실 목록] ${rooms.length}개 발견`);
@@ -114,7 +114,7 @@ export class LibraryAPIClient {
           'Content-Type': 'application/x-www-form-urlencoded'
         }
       });
-      const timeMatches = response.body.matchAll(/<option[^>]*>(\d{1,2}:\d{2})<\/option>/g);
+      const timeMatches = response.body.matchAll(/<option id="startTime_\d+">(\d{1,2}:\d{2})<\/option>/g);
       let starts = Array.from(timeMatches).map((m)=>m[1]);
       const TODAY = new Date().toISOString().slice(0, 10);
       if (dateStr === TODAY) {
